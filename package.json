@@ -1,0 +1,33 @@
+{
+  "name": "vibe-br-video-editor",
+  "version": "1.0.0",
+  "description": "Automated multi-character dialogue video editor for short-form brain rot content",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite --force",
+    "dev:electron": "node scripts/wait-for-vite.js && electron .",
+    "build": "vite build && electron-builder",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1",
+    "vite": "^5.0.12"
+  },
+  "build": {
+    "appId": "com.vibebr.videoeditor",
+    "productName": "VIBE-BR-Video Editor",
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ]
+  }
+}
