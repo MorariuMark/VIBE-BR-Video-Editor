@@ -55,6 +55,9 @@ const initialState = {
   activePanel: 'script', // 'script' | 'media' | 'export'
   showExportModal: false,
   toasts: [],
+  
+  // Voice configurations per character
+  voiceConfigs: {},
 };
 
 // ─── Action Types ───
@@ -71,6 +74,7 @@ const ActionTypes = {
   
   ADD_MEDIA: 'ADD_MEDIA',
   REMOVE_MEDIA: 'REMOVE_MEDIA',
+  RENAME_MEDIA: 'RENAME_MEDIA',
   SET_AUDIO: 'SET_AUDIO',
   SET_AUDIO_BUFFER: 'SET_AUDIO_BUFFER',
   SET_BACKGROUND_VIDEO: 'SET_BACKGROUND_VIDEO',
@@ -98,6 +102,15 @@ const ActionTypes = {
   UPDATE_CHARACTER_STYLE: 'UPDATE_CHARACTER_STYLE',
   UPDATE_BLOCK_ANIMATION: 'UPDATE_BLOCK_ANIMATION',
   BATCH_UPDATE_ANIMATION: 'BATCH_UPDATE_ANIMATION',
+
+  ADD_TRACK: 'ADD_TRACK',
+  REMOVE_TRACK: 'REMOVE_TRACK',
+  UPDATE_TRACK_PROPERTIES: 'UPDATE_TRACK_PROPERTIES',
+  ADD_CLIP_TO_TRACK: 'ADD_CLIP_TO_TRACK',
+  REMOVE_CLIP_FROM_TRACK: 'REMOVE_CLIP_FROM_TRACK',
+  UPDATE_CLIP_TIMING: 'UPDATE_CLIP_TIMING',
+  UPDATE_CLIP_PROPERTIES: 'UPDATE_CLIP_PROPERTIES',
+  SET_VOICE_CONFIGS: 'SET_VOICE_CONFIGS',
 };
 
 // ─── Reducer ───
@@ -220,14 +233,161 @@ function projectReducer(state, action) {
     case ActionTypes.REMOVE_MEDIA:
       return { ...state, mediaItems: state.mediaItems.filter(m => m.id !== action.payload) };
     
-    case ActionTypes.SET_AUDIO:
-      return { ...state, audioFile: action.payload };
+    case ActionTypes.RENAME_MEDIA: {
+      const { id, name } = action.payload;
+      const mediaItems = state.mediaItems.map(m => m.id === id ? { ...m, name } : m);
+      return { ...state, mediaItems };
+    }
+    
+    case ActionTypes.SET_AUDIO: {
+      const audio = action.payload;
+      const tracks = state.tracks.map(track => {
+        if (track.id === 'track_audio_1') {
+          return {
+            ...track,
+            clips: audio ? [{
+              id: 'clip_audio',
+              name: audio.name || 'Dialogue Audio',
+              startTime: 0,
+              duration: audio.duration || state.totalDuration,
+              color: '#00e5ff',
+              path: audio.path,
+              dataUrl: audio.dataUrl,
+              type: 'audio',
+            }] : [],
+          };
+        }
+        return track;
+      });
+      return { ...state, audioFile: audio, tracks };
+    }
     
     case ActionTypes.SET_AUDIO_BUFFER:
       return { ...state, audioBuffer: action.payload };
     
-    case ActionTypes.SET_BACKGROUND_VIDEO:
-      return { ...state, backgroundVideo: action.payload };
+    case ActionTypes.SET_BACKGROUND_VIDEO: {
+      const video = action.payload;
+      const tracks = state.tracks.map(track => {
+        if (track.id === 'track_bg_1') {
+          return {
+            ...track,
+            clips: video ? [{
+              id: 'clip_bg',
+              name: video.name || 'Background',
+              startTime: 0,
+              duration: state.totalDuration,
+              color: '#444466',
+              path: video.path,
+              dataUrl: video.dataUrl,
+              type: 'video',
+            }] : [],
+          };
+        }
+        return track;
+      });
+      return { ...state, backgroundVideo: video, tracks };
+    }
+
+    case ActionTypes.ADD_TRACK: {
+      const { type, name } = action.payload;
+      const trackId = `${type}_track_${Date.now()}`;
+      const color = type === 'audio' ? '#00e5ff' : '#444466';
+      const newTrack = {
+        id: trackId,
+        name: name || `${type === 'audio' ? 'Audio' : 'Video'} Track`,
+        type,
+        color,
+        clips: [],
+      };
+      return { ...state, tracks: [...state.tracks, newTrack] };
+    }
+    
+    case ActionTypes.REMOVE_TRACK: {
+      const trackId = action.payload;
+      return { ...state, tracks: state.tracks.filter(t => t.id !== trackId) };
+    }
+    
+    case ActionTypes.UPDATE_TRACK_PROPERTIES: {
+      const { trackId, properties } = action.payload;
+      const tracks = state.tracks.map(track => {
+        if (track.id !== trackId) return track;
+        return { ...track, ...properties };
+      });
+      return { ...state, tracks };
+    }
+    
+    case ActionTypes.ADD_CLIP_TO_TRACK: {
+      const { trackId, clip } = action.payload;
+      const hasTrack = state.tracks.some(t => t.id === trackId);
+      let tracks;
+      if (!hasTrack) {
+        const type = clip.type || 'video';
+        const color = type === 'audio' ? '#00e5ff' : '#444466';
+        const newTrack = {
+          id: trackId,
+          name: type === 'audio' ? 'Audio Track' : 'Video Track',
+          type,
+          color,
+          clips: [clip],
+        };
+        tracks = [...state.tracks, newTrack];
+      } else {
+        tracks = state.tracks.map(track => {
+          if (track.id !== trackId) return track;
+          return {
+            ...track,
+            clips: [...track.clips, clip],
+          };
+        });
+      }
+      return { ...state, tracks };
+    }
+    
+    case ActionTypes.REMOVE_CLIP_FROM_TRACK: {
+      const { trackId, clipId } = action.payload;
+      const tracks = state.tracks.map(track => {
+        if (track.id !== trackId) return track;
+        return {
+          ...track,
+          clips: track.clips.filter(c => c.id !== clipId),
+        };
+      });
+      return { ...state, tracks };
+    }
+    
+    case ActionTypes.UPDATE_CLIP_TIMING: {
+      const { trackId, clipId, startTime, duration } = action.payload;
+      const tracks = state.tracks.map(track => {
+        if (track.id !== trackId) return track;
+        return {
+          ...track,
+          clips: track.clips.map(clip => {
+            if (clip.id !== clipId) return clip;
+            return {
+              ...clip,
+              startTime: startTime ?? clip.startTime,
+              duration: duration ?? clip.duration,
+            };
+          }),
+        };
+      });
+      return { ...state, tracks };
+    }
+    
+    case ActionTypes.UPDATE_CLIP_PROPERTIES: {
+      const { trackId, clipId, properties } = action.payload;
+      const tracks = state.tracks.map(track => {
+        if (track.id !== trackId) return track;
+        return {
+          ...track,
+          clips: track.clips.map(clip => {
+            if (clip.id !== clipId) return clip;
+            return { ...clip, ...properties };
+          }),
+        };
+      });
+      return { ...state, tracks };
+    }
     
     case ActionTypes.SET_TRACKS:
       return { ...state, tracks: action.payload };
@@ -287,6 +447,9 @@ function projectReducer(state, action) {
     
     case ActionTypes.REMOVE_TOAST:
       return { ...state, toasts: state.toasts.filter(t => t.id !== action.payload) };
+      
+    case ActionTypes.SET_VOICE_CONFIGS:
+      return { ...state, voiceConfigs: { ...(state.voiceConfigs || {}), ...action.payload } };
     
     default:
       return state;
@@ -297,12 +460,10 @@ function projectReducer(state, action) {
  * Generate timeline tracks from dialogue blocks
  */
 function generateTracksFromBlocks(blocks, characters, state) {
-  const tracks = [];
-  
   // 1. Character tracks (placed at the top of the stack)
-  characters.forEach(char => {
+  const charTracks = characters.map(char => {
     const charBlocks = blocks.filter(b => b.characterId === char.id);
-    tracks.push({
+    return {
       id: `track_${char.id}`,
       name: char.name,
       type: 'character',
@@ -316,43 +477,75 @@ function generateTracksFromBlocks(blocks, characters, state) {
         color: char.color,
         blockId: block.id,
       })),
-    });
+    };
   });
 
-  // 2. Background video track (placed below characters)
-  tracks.push({
-    id: 'track_bg',
-    name: 'Background',
-    type: 'video',
-    color: '#444466',
-    clips: state.backgroundVideo ? [{
-      id: 'clip_bg',
-      name: state.backgroundVideo.name || 'Background',
-      startTime: 0,
-      duration: state.totalDuration,
-      color: '#444466',
-    }] : [],
-  });
+  // 2. Keep user tracks (video & audio tracks), but sync any clips that have a blockId!
+  const userTracks = (state.tracks || []).filter(t => t.type === 'video' || t.type === 'audio');
   
-  // 3. Audio track (placed at the very bottom)
-  tracks.push({
-    id: 'track_audio',
-    name: 'Audio',
-    type: 'audio',
-    color: '#00e5ff',
-    clips: state.audioFile ? [{
-      id: 'clip_audio',
-      name: state.audioFile.name || 'Dialogue Audio',
-      startTime: 0,
-      duration: state.audioFile.duration || state.totalDuration,
-      color: '#00e5ff',
-    }] : [],
+  const syncedUserTracks = userTracks.map(track => {
+    return {
+      ...track,
+      clips: track.clips.map(clip => {
+        if (clip.blockId) {
+          const correspondingBlock = blocks.find(b => b.id === clip.blockId);
+          if (correspondingBlock) {
+            return {
+              ...clip,
+              startTime: correspondingBlock.startTime,
+              duration: correspondingBlock.duration,
+            };
+          }
+        }
+        return clip;
+      }),
+    };
   });
 
+  // If there are no user tracks yet, create default Video 1 and Audio 1 tracks
+  if (syncedUserTracks.length === 0) {
+    syncedUserTracks.push({
+      id: 'track_bg_1',
+      name: 'Video 1',
+      type: 'video',
+      color: '#444466',
+      clips: state.backgroundVideo ? [{
+        id: 'clip_bg',
+        name: state.backgroundVideo.name || 'Background',
+        startTime: 0,
+        duration: state.totalDuration,
+        color: '#444466',
+        path: state.backgroundVideo.path,
+        dataUrl: state.backgroundVideo.dataUrl,
+        type: 'video',
+      }] : [],
+    });
+    
+    syncedUserTracks.push({
+      id: 'track_audio_1',
+      name: 'Audio 1',
+      type: 'audio',
+      color: '#00e5ff',
+      clips: state.audioFile ? [{
+        id: 'clip_audio',
+        name: state.audioFile.name || 'Dialogue Audio',
+        startTime: 0,
+        duration: state.audioFile.duration || state.totalDuration,
+        color: '#00e5ff',
+        path: state.audioFile.path,
+        dataUrl: state.audioFile.dataUrl,
+        type: 'audio',
+      }] : [],
+    });
+  }
+
+  // Combined tracks
+  const combined = [...charTracks, ...syncedUserTracks];
+  
   // Sort tracks by existing order if available
   if (state.tracks && state.tracks.length > 0) {
     const existingIds = state.tracks.map(t => t.id);
-    tracks.sort((a, b) => {
+    combined.sort((a, b) => {
       const idxA = existingIds.indexOf(a.id);
       const idxB = existingIds.indexOf(b.id);
       if (idxA === -1 && idxB === -1) return 0;
@@ -362,7 +555,7 @@ function generateTracksFromBlocks(blocks, characters, state) {
     });
   }
   
-  return tracks;
+  return combined;
 }
 
 // ─── Context Provider ───
@@ -413,6 +606,10 @@ export function ProjectProvider({ children }) {
     
     removeMedia: useCallback((id) => {
       dispatch({ type: ActionTypes.REMOVE_MEDIA, payload: id });
+    }, []),
+    
+    renameMedia: useCallback((id, name) => {
+      dispatch({ type: ActionTypes.RENAME_MEDIA, payload: { id, name } });
     }, []),
     
     setAudio: useCallback((audio) => {
@@ -497,6 +694,38 @@ export function ProjectProvider({ children }) {
 
     batchUpdateAnimation: useCallback((characterId, animation) => {
       dispatch({ type: ActionTypes.BATCH_UPDATE_ANIMATION, payload: { characterId, animation } });
+    }, []),
+
+    addTrack: useCallback((type, name) => {
+      dispatch({ type: ActionTypes.ADD_TRACK, payload: { type, name } });
+    }, []),
+
+    removeTrack: useCallback((trackId) => {
+      dispatch({ type: ActionTypes.REMOVE_TRACK, payload: trackId });
+    }, []),
+
+    updateTrackProperties: useCallback((trackId, properties) => {
+      dispatch({ type: ActionTypes.UPDATE_TRACK_PROPERTIES, payload: { trackId, properties } });
+    }, []),
+
+    addClipToTrack: useCallback((trackId, clip) => {
+      dispatch({ type: ActionTypes.ADD_CLIP_TO_TRACK, payload: { trackId, clip } });
+    }, []),
+
+    removeClipFromTrack: useCallback((trackId, clipId) => {
+      dispatch({ type: ActionTypes.REMOVE_CLIP_FROM_TRACK, payload: { trackId, clipId } });
+    }, []),
+
+    updateClipTiming: useCallback((trackId, clipId, startTime, duration) => {
+      dispatch({ type: ActionTypes.UPDATE_CLIP_TIMING, payload: { trackId, clipId, startTime, duration } });
+    }, []),
+
+    updateClipProperties: useCallback((trackId, clipId, properties) => {
+      dispatch({ type: ActionTypes.UPDATE_CLIP_PROPERTIES, payload: { trackId, clipId, properties } });
+    }, []),
+
+    setVoiceConfigs: useCallback((configs) => {
+      dispatch({ type: ActionTypes.SET_VOICE_CONFIGS, payload: configs });
     }, []),
   };
 

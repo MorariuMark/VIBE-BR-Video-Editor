@@ -5,7 +5,7 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
-    "dev:vite": "vite --force",
+    "dev:vite": "vite",
     "dev:electron": "node scripts/wait-for-vite.js && electron .",
     "build": "vite build && electron-builder",
     "preview": "vite preview"

@@ -140,7 +140,14 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  startPythonServer();
+});
+
+app.on('quit', () => {
+  stopPythonServer();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -232,6 +239,16 @@ ipcMain.handle('read-file', async (event, filePath) => {
       path: filePath,
       ext,
     };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// Read file as raw ArrayBuffer (for high-performance binary access)
+ipcMain.handle('read-file-buffer', async (event, filePath) => {
+  try {
+    const data = fs.readFileSync(filePath);
+    return new Uint8Array(data);
   } catch (err) {
     return { error: err.message };
   }
@@ -533,3 +550,238 @@ ipcMain.handle('kill-export', async () => {
     }
   });
 });
+
+// ─── Voice Cloning & Python Server Integration ───────────────
+
+let pythonServerProcess = null;
+
+function startPythonServer() {
+  const pythonPath = path.join(__dirname, '..', '.venv', 'Scripts', 'python.exe');
+  const serverScript = path.join(__dirname, '..', 'scripts', 'voice_clone_server.py');
+  
+  if (!fs.existsSync(pythonPath)) {
+    console.log('[Main] Python virtual environment (.venv) not found. Voice cloning will not be available until installed.');
+    return;
+  }
+
+  console.log('[Main] Starting Python Voice Cloning server...');
+  
+  // Set project-local cache path
+  const hfCachePath = path.join(__dirname, '..', '.hf_cache');
+  
+  pythonServerProcess = spawn(pythonPath, [serverScript], {
+    env: {
+      ...process.env,
+      HF_HOME: hfCachePath
+    }
+  });
+
+  pythonServerProcess.stdout.on('data', (data) => {
+    console.log(`[Python Server stdout] ${data.toString().trim()}`);
+  });
+
+  pythonServerProcess.stderr.on('data', (data) => {
+    console.error(`[Python Server stderr] ${data.toString().trim()}`);
+  });
+
+  pythonServerProcess.on('close', (code) => {
+    console.log(`[Main] Python server exited with code ${code}`);
+    pythonServerProcess = null;
+  });
+}
+
+function stopPythonServer() {
+  if (pythonServerProcess) {
+    console.log('[Main] Stopping Python Voice Cloning server...');
+    pythonServerProcess.kill('SIGTERM');
+    pythonServerProcess = null;
+  }
+}
+
+let voiceCloneWindow = null;
+
+function createVoiceCloneWindow() {
+  if (voiceCloneWindow) {
+    voiceCloneWindow.focus();
+    return;
+  }
+
+  voiceCloneWindow = new BrowserWindow({
+    width: 850,
+    height: 750,
+    parent: mainWindow,
+    modal: false,
+    backgroundColor: '#0a0a0f',
+    title: 'Voice Cloning & TTS',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false,
+    },
+  });
+
+  if (isDev) {
+    voiceCloneWindow.loadURL('http://localhost:5173/#/voice-clone');
+  } else {
+    voiceCloneWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), { hash: '/voice-clone' });
+  }
+
+  voiceCloneWindow.on('closed', () => {
+    voiceCloneWindow = null;
+  });
+}
+
+// IPC Triggers
+ipcMain.on('open-voice-clone-window', () => {
+  createVoiceCloneWindow();
+});
+
+let activeProjectState = null;
+
+ipcMain.handle('set-active-project-state', (event, state) => {
+  activeProjectState = state;
+  return { success: true };
+});
+
+ipcMain.handle('get-active-project-state', () => {
+  return activeProjectState;
+});
+
+ipcMain.handle('apply-timeline-voices', async (event, payload) => {
+  if (mainWindow) {
+    mainWindow.webContents.send('timeline-voices-updated', payload);
+    return { success: true };
+  }
+  return { success: false, error: 'Main window not available' };
+});
+
+const presetsFilePath = path.join(__dirname, '..', 'presets', 'voice_presets.json');
+
+ipcMain.handle('save-voice-preset', async (event, preset) => {
+  try {
+    const presetsDir = path.dirname(presetsFilePath);
+    if (!fs.existsSync(presetsDir)) {
+      fs.mkdirSync(presetsDir, { recursive: true });
+    }
+    let presets = [];
+    if (fs.existsSync(presetsFilePath)) {
+      presets = JSON.parse(fs.readFileSync(presetsFilePath, 'utf8'));
+    }
+    // Remove existing preset with same name
+    presets = presets.filter(p => p.name.toLowerCase() !== preset.name.toLowerCase());
+    presets.push(preset);
+    fs.writeFileSync(presetsFilePath, JSON.stringify(presets, null, 2), 'utf8');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('load-voice-presets', async () => {
+  try {
+    if (fs.existsSync(presetsFilePath)) {
+      return JSON.parse(fs.readFileSync(presetsFilePath, 'utf8'));
+    }
+    return [];
+  } catch (err) {
+    console.error('Failed to load presets:', err);
+    return [];
+  }
+});
+
+ipcMain.handle('get-project-path', () => {
+  return path.join(__dirname, '..');
+});
+
+ipcMain.handle('list-default-voices', async () => {
+  try {
+    const voicesDir = path.join(__dirname, '..', 'assets', 'default_voices');
+    if (!fs.existsSync(voicesDir)) return [];
+    const files = fs.readdirSync(voicesDir);
+    const wavFiles = files.filter(f => f.toLowerCase().endsWith('.wav'));
+    const result = [];
+    for (const file of wavFiles) {
+      const wavPath = path.join(voicesDir, file);
+      const txPath = wavPath + '.txt';
+      let transcript = '';
+      if (fs.existsSync(txPath)) {
+        transcript = fs.readFileSync(txPath, 'utf8').trim();
+      }
+      result.push({
+        name: file.replace('_ref.wav', '').replace('.wav', ''),
+        path: wavPath,
+        transcript
+      });
+    }
+    return result;
+  } catch (err) {
+    console.error('Failed to list default voices:', err);
+    return [];
+  }
+});
+
+ipcMain.handle('copy-file', async (event, { src, dest }) => {
+  try {
+    fs.copyFileSync(src, dest);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('mix-audio-clips', async (event, { clips, outputPath }) => {
+  return new Promise((resolve) => {
+    try {
+      const ffmpegPath = getFFmpegPath();
+      const args = ['-y'];
+      
+      clips.forEach(clip => {
+        args.push('-i', clip.path);
+      });
+      
+      const filterParts = [];
+      const labels = [];
+      clips.forEach((clip, idx) => {
+        const delayMs = Math.round(clip.startTime * 1000);
+        filterParts.push(`[${idx}:a]adelay=${delayMs}|${delayMs}[a${idx}]`);
+        labels.push(`[a${idx}]`);
+      });
+      
+      filterParts.push(`${labels.join('')}amix=inputs=${clips.length}:normalize=0[out]`);
+      
+      args.push('-filter_complex', filterParts.join(';'));
+      args.push('-map', '[out]');
+      args.push(outputPath);
+      
+      console.log('[Main] Mix audio clips command:', ffmpegPath, args.join(' '));
+      const proc = spawn(ffmpegPath, args);
+      let stderr = '';
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('close', (code) => {
+        if (code === 0) {
+          resolve({ success: true, outputPath });
+        } else {
+          resolve({ success: false, error: stderr });
+        }
+      });
+      proc.on('error', (err) => {
+        resolve({ success: false, error: err.message });
+      });
+    } catch (err) {
+      resolve({ success: false, error: err.message });
+    }
+  });
+});
+
+ipcMain.handle('delete-file', async (event, filePath) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+

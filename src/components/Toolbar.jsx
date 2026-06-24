@@ -8,6 +8,23 @@ export default function Toolbar() {
   const { state, actions } = useProject();
   const { activeTool } = state;
 
+  const [theme, setTheme] = React.useState(() => {
+    return localStorage.getItem('theme') || 'default';
+  });
+
+  React.useEffect(() => {
+    if (theme === 'dark-gay') {
+      document.body.classList.add('theme-dark-gay');
+    } else {
+      document.body.classList.remove('theme-dark-gay');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const handleThemeToggle = () => {
+    setTheme(prev => prev === 'default' ? 'dark-gay' : 'default');
+  };
+
   const tools = [
     { id: 'select', label: 'Select', shortcut: 'V' },
     { id: 'cut', label: 'Cut', shortcut: 'C' },
@@ -56,18 +73,20 @@ export default function Toolbar() {
       const paths = await window.electronAPI.openFileDialog();
       if (paths && paths.length > 0) {
         for (const filePath of paths) {
-          const fileData = await window.electronAPI.readFile(filePath);
+          const fileData = await window.electronAPI.getFileInfo(filePath);
           if (fileData.error) {
             actions.addToast(`Failed to import: ${fileData.error}`, 'error');
             continue;
           }
+          const ext = fileData.ext;
+          const type = getMediaType(ext);
           const item = {
             id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             name: fileData.name,
             path: fileData.path,
-            ext: fileData.ext,
-            dataUrl: `data:${fileData.mime};base64,${fileData.data}`,
-            type: getMediaType(fileData.ext),
+            ext,
+            dataUrl: `file:///${fileData.path.replace(/\\/g, '/')}`,
+            type,
           };
           actions.addMedia(item);
           
@@ -113,6 +132,19 @@ export default function Toolbar() {
     }
   };
 
+  const handleVoiceCloneOpen = async () => {
+    if (window.electronAPI && window.electronAPI.setActiveProjectState) {
+      await window.electronAPI.setActiveProjectState({
+        characters: state.characters,
+        dialogueBlocks: state.dialogueBlocks,
+        voiceConfigs: state.voiceConfigs
+      });
+      window.electronAPI.openVoiceCloneWindow();
+    } else {
+      actions.addToast("Voice Cloning requires the desktop Electron environment.", "warning");
+    }
+  };
+
   return (
     <div className="toolbar">
       <div className="toolbar__group">
@@ -134,9 +166,24 @@ export default function Toolbar() {
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           Import
         </button>
+        <button className="toolbar__btn" onClick={handleVoiceCloneOpen} title="AI Voice Clone & TTS">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+          Voice Clone
+        </button>
       </div>
 
       <div className="toolbar__spacer" />
+
+      <div className="toolbar__group">
+        <button
+          className="toolbar__btn"
+          onClick={handleThemeToggle}
+          title={theme === 'dark-gay' ? 'Switch to Default Theme' : 'Switch to Dark-Gay Theme'}
+        >
+          <span style={{ fontSize: '14px' }}>{theme === 'dark-gay' ? '🌈' : '🎨'}</span>
+          <span>Theme</span>
+        </button>
+      </div>
 
       <div className="toolbar__group">
         <button

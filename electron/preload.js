@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFileDialog: (options) => ipcRenderer.invoke('open-file-dialog', options),
   saveFileDialog: (options) => ipcRenderer.invoke('save-file-dialog', options),
   readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
+  readFileBuffer: (filePath) => ipcRenderer.invoke('read-file-buffer', filePath),
   getFileInfo: (filePath) => ipcRenderer.invoke('get-file-info', filePath),
 
   // Export
@@ -29,4 +30,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // GPU Settings
   setGPUAcceleration: (enabled) => ipcRenderer.invoke('set-gpu-acceleration', enabled),
   getGPUAcceleration: () => ipcRenderer.invoke('get-gpu-acceleration'),
+
+  // Voice Cloning
+  openVoiceCloneWindow: () => ipcRenderer.send('open-voice-clone-window'),
+  setActiveProjectState: (state) => ipcRenderer.invoke('set-active-project-state', state),
+  getActiveProjectState: () => ipcRenderer.invoke('get-active-project-state'),
+  applyTimelineVoices: (config) => ipcRenderer.invoke('apply-timeline-voices', config),
+  onTimelineVoicesUpdated: (callback) => ipcRenderer.on('timeline-voices-updated', (event, data) => callback(data)),
+  removeTimelineVoicesUpdated: () => ipcRenderer.removeAllListeners('timeline-voices-updated'),
+  saveVoicePreset: (preset) => ipcRenderer.invoke('save-voice-preset', preset),
+  loadVoicePresets: () => ipcRenderer.invoke('load-voice-presets'),
+  getProjectPath: () => ipcRenderer.invoke('get-project-path'),
+  listDefaultVoices: () => ipcRenderer.invoke('list-default-voices'),
+  copyFile: (src, dest) => ipcRenderer.invoke('copy-file', { src, dest }),
+  mixAudioClips: (config) => ipcRenderer.invoke('mix-audio-clips', config),
+  deleteFile: (filePath) => ipcRenderer.invoke('delete-file', filePath),
 });
+

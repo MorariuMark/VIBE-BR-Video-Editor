@@ -164,9 +164,9 @@ export function generateFFmpegCommand(config) {
     finalArgs.push('-map', `${audioIndex}:a`);
   }
 
-  // Calculate script duration
+  // Calculate script duration (add a 1.5s cushion to prevent cutoff of the last word)
   const lastBlock = blocks[blocks.length - 1];
-  const scriptDuration = lastBlock ? (lastBlock.startTime + lastBlock.duration) : 30;
+  const scriptDuration = lastBlock ? (lastBlock.startTime + lastBlock.duration + 1.5) : 30;
 
   finalArgs.push(
     '-c:v', codec,

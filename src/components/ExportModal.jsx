@@ -47,6 +47,7 @@ export default function ExportModal() {
     actions.setExporting(true);
     actions.setExportProgress(0);
 
+    let tempAudioOutput = '';
     try {
       let outputPath;
       
@@ -58,6 +59,43 @@ export default function ExportModal() {
         if (!outputPath) {
           actions.setExporting(false);
           return;
+        }
+
+        // Gather and mix all timeline audio clips
+        const audioClips = [];
+        state.tracks.forEach(track => {
+          if (track.type === 'audio') {
+            track.clips.forEach(clip => {
+              if (clip.path) {
+                audioClips.push({
+                  path: clip.path,
+                  startTime: clip.startTime,
+                  duration: clip.duration
+                });
+              }
+            });
+          }
+        });
+
+        let finalAudioPath = '';
+        if (audioClips.length > 0) {
+          if (window.electronAPI.mixAudioClips) {
+            const projectPath = await window.electronAPI.getProjectPath();
+            tempAudioOutput = `${projectPath.replace(/\\/g, '/')}/dist/temp_mix_${Date.now()}.wav`;
+            actions.addToast('Mixing audio tracks... 🎤', 'info');
+            const mixRes = await window.electronAPI.mixAudioClips({
+              clips: audioClips,
+              outputPath: tempAudioOutput
+            });
+            if (mixRes.success) {
+              finalAudioPath = tempAudioOutput;
+            } else {
+              console.error("FFmpeg mixing failed, using first audio clip:", mixRes.error);
+              finalAudioPath = audioClips[0].path;
+            }
+          } else {
+            finalAudioPath = audioClips[0].path;
+          }
         }
 
         if (renderMethod === 'native') {
@@ -81,7 +119,7 @@ export default function ExportModal() {
             blocks: state.dialogueBlocks,
             characterAssets: characterAssetsMap,
             characterTransforms: state.characterTransforms,
-            audioPath: state.audioFile?.path || '',
+            audioPath: finalAudioPath,
             outputPath,
             settings: state.exportSettings,
           };
@@ -119,6 +157,25 @@ export default function ExportModal() {
               };
               img.onerror = () => resolve();
             });
+          }
+        }
+
+        // Preload timeline image clips
+        for (const track of state.tracks) {
+          if (track.type === 'video') {
+            for (const clip of track.clips) {
+              if (clip.type === 'image' && clip.dataUrl) {
+                await new Promise((resolve) => {
+                  const img = new Image();
+                  img.src = clip.dataUrl;
+                  img.onload = () => {
+                    loadedImages[clip.id] = img;
+                    resolve();
+                  };
+                  img.onerror = () => resolve();
+                });
+              }
+            }
           }
         }
 
@@ -168,7 +225,7 @@ export default function ExportModal() {
         // Start the frame-by-frame export process in main process
         const exportPromise = window.electronAPI.startFrameExport({
           settings: state.exportSettings,
-          audioPath: state.audioFile?.path || '',
+          audioPath: finalAudioPath,
           backgroundVideoPath: renderMethod === 'canvas' ? (state.backgroundVideo?.path || '') : '',
           totalDuration: state.totalDuration,
           outputPath,
@@ -261,6 +318,9 @@ export default function ExportModal() {
       actions.addToast(`Export error: ${err.message}`, 'error');
     } finally {
       actions.setExporting(false);
+      if (tempAudioOutput && window.electronAPI && window.electronAPI.deleteFile) {
+        await window.electronAPI.deleteFile(tempAudioOutput);
+      }
     }
   };
 

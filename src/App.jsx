@@ -10,6 +10,7 @@ import ExportModal from './components/ExportModal';
 import ToastContainer from './components/ToastContainer';
 
 function AppContent() {
+  const { state, actions } = useProject();
   const [leftWidth, setLeftWidth] = useState(280);
   const [rightWidth, setRightWidth] = useState(380);
   const [timelineHeight, setTimelineHeight] = useState(260);
@@ -56,6 +57,71 @@ function AppContent() {
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
   }, [leftWidth, rightWidth, timelineHeight]);
+
+  useEffect(() => {
+    if (window.electronAPI && window.electronAPI.onTimelineVoicesUpdated) {
+      window.electronAPI.onTimelineVoicesUpdated(async (payload) => {
+        const voices = payload.voices || [];
+        if (payload.voiceConfigs) {
+          actions.setVoiceConfigs(payload.voiceConfigs);
+        }
+        if (payload.audioPath) {
+          voices.push({ audioPath: payload.audioPath, characterName: 'voiceover' });
+        }
+
+        if (voices.length === 0) return;
+
+        actions.addToast(`Adding ${voices.length} AI Voiceover clips to Media Library... 🎤`, 'info');
+
+        for (let i = 0; i < voices.length; i++) {
+          const { audioPath, characterName, blockId, characterId, duration } = voices[i];
+          const name = audioPath.split(/[\\/]/).pop();
+          
+          let dataUrl = '';
+          try {
+            const fileBuffer = await window.electronAPI.readFileBuffer(audioPath);
+            if (fileBuffer && !fileBuffer.error && fileBuffer.byteLength > 0) {
+              const arrayBuffer = new ArrayBuffer(fileBuffer.byteLength);
+              new Uint8Array(arrayBuffer).set(fileBuffer);
+              
+              // Create Blob URL for safe audio element playback, avoiding file:/// scheme crashes
+              const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+              dataUrl = URL.createObjectURL(blob);
+            } else {
+              console.error("Failed to read file buffer or buffer is empty:", fileBuffer?.error);
+            }
+          } catch (bufErr) {
+            console.error("Failed to read file buffer for dataUrl:", bufErr);
+          }
+
+          const item = {
+            id: `media_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 9)}`,
+            name: name,
+            path: audioPath,
+            ext: '.wav',
+            dataUrl: dataUrl || `file:///${audioPath.replace(/\\/g, '/')}`,
+            type: 'audio',
+            isVoiceClone: !!blockId,
+            blockId,
+            characterId,
+            characterName,
+            duration: duration || 0,
+          };
+
+          // Add to media library only
+          actions.addMedia(item);
+        }
+
+        actions.addToast(`All ${voices.length} voiceover clips added to Media Library! 🎤`, 'success');
+      });
+
+      return () => {
+        if (window.electronAPI.removeTimelineVoicesUpdated) {
+          window.electronAPI.removeTimelineVoicesUpdated();
+        }
+      };
+    }
+  }, [actions]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>

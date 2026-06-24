@@ -5,3 +5,6 @@ dist/
 .DS_Store
 bin/
 node/
+.venv/
+.hf_cache/
+scratch/

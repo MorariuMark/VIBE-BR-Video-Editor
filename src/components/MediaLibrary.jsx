@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useProject } from '../store/ProjectContext';
 
 const getVideoDuration = (dataUrl) => {
@@ -15,13 +15,55 @@ const getVideoDuration = (dataUrl) => {
   });
 };
 
+const getAudioDuration = (dataUrl) => {
+  return new Promise((resolve) => {
+    const audio = new Audio();
+    audio.preload = 'metadata';
+    audio.src = dataUrl;
+    audio.onloadedmetadata = () => {
+      resolve(audio.duration);
+    };
+    audio.onerror = () => {
+      resolve(5); // fallback default
+    };
+  });
+};
+
+function HoverMenuItem({ text, onClick, color }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      style={{
+        padding: '8px 12px',
+        fontSize: '12px',
+        cursor: 'pointer',
+        color: color || '#e3e3e8',
+        background: hover ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+        transition: 'background 0.2s',
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={onClick}
+    >
+      {text}
+    </div>
+  );
+}
+
 /**
  * Media Library Panel - holds imported video clips, character PNGs, and audio
  */
 export default function MediaLibrary() {
-  const { state, actions } = useProject();
+  const { state, actions, dispatch } = useProject();
   const [activeTab, setActiveTab] = useState('all');
   const [optimizing, setOptimizing] = useState({});
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, item }
+
+  useEffect(() => {
+    const closeMenu = () => setContextMenu(null);
+    window.addEventListener('click', closeMenu);
+    return () => window.removeEventListener('click', closeMenu);
+  }, []);
 
   const tabs = [
     { id: 'all', label: 'All' },
@@ -43,13 +85,21 @@ export default function MediaLibrary() {
           if (fileData.error) continue;
           const ext = fileData.ext;
           const type = getMediaType(ext);
+          const dataUrl = `file:///${fileData.path.replace(/\\/g, '/')}`;
+          let duration = undefined;
+          if (type === 'video') {
+            duration = await getVideoDuration(dataUrl);
+          } else if (type === 'audio') {
+            duration = await getAudioDuration(dataUrl);
+          }
           const item = {
             id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             name: fileData.name,
             path: fileData.path,
             ext,
-            dataUrl: `file:///${fileData.path.replace(/\\/g, '/')}`,
+            dataUrl,
             type,
+            duration,
           };
           actions.addMedia(item);
           actions.addToast(`Imported: ${fileData.name}`, 'success');
@@ -64,13 +114,21 @@ export default function MediaLibrary() {
         for (const file of e.target.files) {
           const dataUrl = await readFileAsDataUrl(file);
           const ext = '.' + file.name.split('.').pop().toLowerCase();
+          const type = getMediaType(ext);
+          let duration = undefined;
+          if (type === 'video') {
+            duration = await getVideoDuration(dataUrl);
+          } else if (type === 'audio') {
+            duration = await getAudioDuration(dataUrl);
+          }
           const item = {
             id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             name: file.name,
             path: file.name,
             ext,
             dataUrl,
-            type: getMediaType(ext),
+            type,
+            duration,
           };
           actions.addMedia(item);
           actions.addToast(`Imported: ${file.name}`, 'success');
@@ -163,6 +221,94 @@ export default function MediaLibrary() {
     }
   };
 
+  const handleExportItem = async (item) => {
+    setContextMenu(null);
+    if (!window.electronAPI) {
+      actions.addToast("Export requires the desktop app.", "error");
+      return;
+    }
+    
+    const defaultPath = item.name;
+    const dest = await window.electronAPI.saveFileDialog({
+      defaultPath,
+      filters: [{ name: item.type === 'audio' ? 'Audio File' : item.type === 'video' ? 'Video File' : 'Image File', extensions: [item.ext.replace('.', '')] }]
+    });
+    
+    if (dest) {
+      actions.addToast(`Exporting to ${dest}...`, "info");
+      const res = await window.electronAPI.copyFile(item.path, dest);
+      if (res.success) {
+        actions.addToast("Export successful!", "success");
+      } else {
+        actions.addToast(`Export failed: ${res.error}`, "error");
+      }
+    }
+  };
+
+  const handleRenameItem = (item) => {
+    setContextMenu(null);
+    const newName = prompt("Rename media item:", item.name);
+    if (newName && newName.trim()) {
+      actions.renameMedia(item.id, newName.trim());
+      actions.addToast("Renamed media item!", "success");
+    }
+  };
+
+  const handleDeleteItem = (item) => {
+    setContextMenu(null);
+    if (confirm(`Are you sure you want to delete "${item.name}" from library?`)) {
+      actions.removeMedia(item.id);
+      actions.addToast("Removed media item!", "success");
+    }
+  };
+
+  const handleAutoApplyVoice = (item) => {
+    // 1. Find dialogue block
+    let block = state.dialogueBlocks.find(b => b.id === item.blockId);
+    if (!block && item.name) {
+      const match = item.name.match(/voice_(\d+)_/);
+      if (match) {
+        const idx = parseInt(match[1]) - 1;
+        if (idx >= 0 && idx < state.dialogueBlocks.length) {
+          block = state.dialogueBlocks[idx];
+        }
+      }
+    }
+
+    if (!block) {
+      actions.addToast("Could not find matching dialogue block for this voice clone.", "warning");
+      return;
+    }
+
+    // 2. Set dialogue block duration to audio's duration, shifting subsequent blocks
+    const duration = item.duration || 3.0;
+    actions.updateBlockTiming(block.id, undefined, duration);
+
+    // 3. Find the first audio track
+    let audioTrack = state.tracks.find(t => t.type === 'audio');
+    if (!audioTrack) {
+      audioTrack = { id: 'track_audio_1', color: '#00e5ff' };
+    }
+
+    // 4. Create clip on this audio track that is linked to the blockId
+    const newClip = {
+      id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: item.name,
+      startTime: block.startTime,
+      duration: duration,
+      color: audioTrack.color || '#00e5ff',
+      path: item.path,
+      dataUrl: item.dataUrl,
+      type: 'audio',
+      blockId: block.id,
+    };
+
+    // Add clip to the track
+    actions.addClipToTrack(audioTrack.id, newClip);
+    actions.addToast(`Applied voice to dialogue line of ${block.characterName}! 🎤`, "success");
+  };
+
+
   return (
     <div className="media-library panel">
       <div className="panel__header">
@@ -207,6 +353,12 @@ export default function MediaLibrary() {
                 onDragStart={(e) => handleDragStart(e, item)}
                 onContextMenu={(e) => {
                   e.preventDefault();
+                  e.stopPropagation();
+                  setContextMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    item
+                  });
                 }}
               >
                 {item.type === 'video' && (
@@ -270,6 +422,23 @@ export default function MediaLibrary() {
                       <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
                     </div>
                     <div className="media-item__label">{item.name}</div>
+                    
+                    {item.isVoiceClone && (
+                      <button
+                        style={{
+                          position: 'absolute', bottom: 4, right: 4,
+                          background: '#7c4dff', border: 'none',
+                          borderRadius: 4, padding: '3px 6px', fontSize: '10px',
+                          color: 'white', cursor: 'pointer', fontWeight: 'bold',
+                          zIndex: 10, display: 'flex', alignItems: 'center', gap: 2
+                        }}
+                        onClick={(e) => { e.stopPropagation(); handleAutoApplyVoice(item); }}
+                        title="Auto-apply to dialogue track"
+                      >
+                        ⚡ Apply
+                      </button>
+                    )}
+
                     <div
                       style={{
                         position: 'absolute', top: 4, right: 4,
@@ -294,6 +463,28 @@ export default function MediaLibrary() {
           </div>
         )}
       </div>
+
+      {contextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            top: contextMenu.y,
+            left: contextMenu.x,
+            background: '#151520',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            boxShadow: '0 8px 16px rgba(0,0,0,0.6)',
+            borderRadius: 6,
+            zIndex: 10000,
+            padding: '4px 0',
+            minWidth: 120,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <HoverMenuItem text="📥 Export File" onClick={() => handleExportItem(contextMenu.item)} />
+          <HoverMenuItem text="✏️ Rename" onClick={() => handleRenameItem(contextMenu.item)} />
+          <HoverMenuItem text="🗑️ Delete" color="#ff4081" onClick={() => handleDeleteItem(contextMenu.item)} />
+        </div>
+      )}
     </div>
   );
 }

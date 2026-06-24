@@ -12,8 +12,8 @@ export default function PreviewCanvas() {
   const containerRef = useRef(null);
   const renderAnimFrameRef = useRef(null);
   const playbackAnimFrameRef = useRef(null);
-  const audioRef = useRef(null);
-  const videoRef = useRef(null);
+  const audioElementsRef = useRef({});
+  const videoElementsRef = useRef({});
   const playStartRef = useRef(null);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [dragging, setDragging] = useState(null); // { type: 'move'|'resize', elementId, startX, startY, origTransform, cx, cy, origDist }
@@ -63,102 +63,125 @@ export default function PreviewCanvas() {
     });
   }, [state.characters]);
 
-  // ── Sync audio file playback and seek ──
+  // Preload timeline images (for image clips on video tracks)
   useEffect(() => {
-    if (!state.audioFile || (!state.audioFile.dataUrl && !state.audioFile.path)) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
+    state.tracks.forEach(track => {
+      if (track.type === 'video') {
+        track.clips.forEach(clip => {
+          if (clip.type === 'image' && clip.dataUrl && !loadedImagesRef.current[clip.id]) {
+            const img = new Image();
+            img.src = clip.dataUrl;
+            img.onload = () => {
+              loadedImagesRef.current[clip.id] = img;
+            };
+          }
+        });
       }
-      return;
-    }
+    });
+  }, [state.tracks]);
 
-    if (!audioRef.current) {
-      audioRef.current = new Audio();
-    }
-
-    const audioUrl = window.electronAPI && state.audioFile.path
-      ? `file:///${state.audioFile.path.replace(/\\/g, '/')}`
-      : state.audioFile.dataUrl;
-
-    if (audioRef.current.src !== audioUrl) {
-      audioRef.current.src = audioUrl;
-      audioRef.current.load();
-    }
-  }, [state.audioFile]);
-
+  // ── Sync multi-track audio playback and seek ──
   useEffect(() => {
-    if (!audioRef.current) return;
-    if (state.isPlaying) {
-      audioRef.current.currentTime = state.currentTime;
-      audioRef.current.play().catch(err => console.error("Audio autoplay blocked:", err));
-    } else {
-      audioRef.current.pause();
-    }
-  }, [state.isPlaying]);
+    const audioClips = state.tracks
+      .filter(t => t.type === 'audio')
+      .flatMap(t => t.clips);
 
-  useEffect(() => {
-    if (!audioRef.current || !state.isPlaying) return;
-    const interval = setInterval(() => {
-      if (Math.abs(audioRef.current.currentTime - state.currentTime) > 0.15) {
-        actions.setCurrentTime(audioRef.current.currentTime);
+    const now = state.currentTime;
+    const isPlaying = state.isPlaying;
+
+    audioClips.forEach(clip => {
+      let audioEl = audioElementsRef.current[clip.id];
+      if (!audioEl) {
+        audioEl = new Audio();
+        audioEl.src = clip.dataUrl || `file:///${clip.path.replace(/\\/g, '/')}`;
+        audioEl.load();
+        audioElementsRef.current[clip.id] = audioEl;
       }
-    }, 100);
-    return () => clearInterval(interval);
-  }, [state.isPlaying, state.currentTime, actions]);
 
-  useEffect(() => {
-    if (!audioRef.current) return;
-    if (Math.abs(audioRef.current.currentTime - state.currentTime) > 0.2) {
-      audioRef.current.currentTime = state.currentTime;
-    }
-  }, [state.currentTime]);
+      const isActive = now >= clip.startTime && now < (clip.startTime + clip.duration);
 
-  // ── Sync background video file playback and seek ──
-  useEffect(() => {
-    if (!state.backgroundVideo || (!state.backgroundVideo.dataUrl && !state.backgroundVideo.path)) {
-      if (videoRef.current) {
-        videoRef.current.pause();
-        videoRef.current.src = '';
+      if (isActive && isPlaying) {
+        const targetTime = now - clip.startTime;
+        if (Math.abs(audioEl.currentTime - targetTime) > 0.15) {
+          audioEl.currentTime = targetTime;
+        }
+        if (audioEl.paused) {
+          audioEl.play().catch(err => console.error("Clip audio play error:", err));
+        }
+      } else {
+        if (!audioEl.paused) {
+          audioEl.pause();
+        }
+        const targetTime = Math.max(0, now - clip.startTime);
+        if (targetTime < clip.duration && Math.abs(audioEl.currentTime - targetTime) > 0.1) {
+          audioEl.currentTime = targetTime;
+        }
       }
-      return;
-    }
+    });
 
-    if (!videoRef.current) {
-      videoRef.current = document.createElement('video');
-      videoRef.current.muted = true;
-      videoRef.current.loop = true;
-      videoRef.current.playsInline = true;
-    }
+    // Cleanup unused audio elements
+    const currentClipIds = new Set(audioClips.map(c => c.id));
+    Object.keys(audioElementsRef.current).forEach(id => {
+      if (!currentClipIds.has(id)) {
+        audioElementsRef.current[id].pause();
+        delete audioElementsRef.current[id];
+      }
+    });
+  }, [state.currentTime, state.isPlaying, state.tracks]);
 
-    const videoUrl = window.electronAPI && state.backgroundVideo.path
-      ? `file:///${state.backgroundVideo.path.replace(/\\/g, '/')}`
-      : state.backgroundVideo.dataUrl;
-
-    if (videoRef.current.src !== videoUrl) {
-      videoRef.current.src = videoUrl;
-      videoRef.current.load();
-    }
-  }, [state.backgroundVideo]);
-
+  // ── Sync multi-track video playback and seek ──
   useEffect(() => {
-    if (!videoRef.current) return;
-    if (state.isPlaying) {
-      videoRef.current.currentTime = state.currentTime % (videoRef.current.duration || state.totalDuration || 1);
-      videoRef.current.play().catch(err => console.error("Video autoplay blocked:", err));
-    } else {
-      videoRef.current.pause();
-    }
-  }, [state.isPlaying]);
+    const videoClips = state.tracks
+      .filter(t => t.type === 'video')
+      .flatMap(t => t.clips)
+      .filter(c => c.type === 'video');
 
-  useEffect(() => {
-    if (!videoRef.current) return;
-    const duration = videoRef.current.duration || 1;
-    const targetTime = state.currentTime % duration;
-    if (Math.abs(videoRef.current.currentTime - targetTime) > 0.2) {
-      videoRef.current.currentTime = targetTime;
-    }
-  }, [state.currentTime]);
+    const now = state.currentTime;
+    const isPlaying = state.isPlaying;
+
+    videoClips.forEach(clip => {
+      let videoEl = videoElementsRef.current[clip.id];
+      if (!videoEl) {
+        videoEl = document.createElement('video');
+        videoEl.muted = true;
+        videoEl.playsInline = true;
+        videoEl.src = clip.dataUrl || `file:///${clip.path.replace(/\\/g, '/')}`;
+        videoEl.load();
+        videoElementsRef.current[clip.id] = videoEl;
+      }
+
+      const isActive = now >= clip.startTime && now < (clip.startTime + clip.duration);
+
+      if (isActive && isPlaying) {
+        const duration = videoEl.duration || clip.duration || 1;
+        const targetTime = (now - clip.startTime) % duration;
+        if (Math.abs(videoEl.currentTime - targetTime) > 0.15) {
+          videoEl.currentTime = targetTime;
+        }
+        if (videoEl.paused) {
+          videoEl.play().catch(err => console.error("Clip video play error:", err));
+        }
+      } else {
+        if (!videoEl.paused) {
+          videoEl.pause();
+        }
+        const duration = videoEl.duration || clip.duration || 1;
+        const targetTime = (now - clip.startTime) % duration;
+        if (targetTime >= 0 && targetTime < clip.duration && Math.abs(videoEl.currentTime - targetTime) > 0.1) {
+          videoEl.currentTime = targetTime;
+        }
+      }
+    });
+
+    // Cleanup unused video elements
+    const currentClipIds = new Set(videoClips.map(c => c.id));
+    Object.keys(videoElementsRef.current).forEach(id => {
+      if (!currentClipIds.has(id)) {
+        videoElementsRef.current[id].pause();
+        delete videoElementsRef.current[id];
+      }
+    });
+  }, [state.currentTime, state.isPlaying, state.tracks]);
 
   const [gpuEnabled, setGpuEnabled] = useState(false);
   const [preRenderProgress, setPreRenderProgress] = useState(null);
@@ -297,7 +320,7 @@ export default function PreviewCanvas() {
       width,
       height,
       loadedImages: loadedImagesRef.current,
-      videoElement: bgFrame || videoRef.current,
+      videoElement: bgFrame || videoElementsRef.current,
       drawHandles: true,
     });
   }, [state, canvasSize]);

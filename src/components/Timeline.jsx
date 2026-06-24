@@ -12,11 +12,22 @@ export default function Timeline() {
   const [resizingClip, setResizingClip] = useState(null);
   const [draggingTrackId, setDraggingTrackId] = useState(null);
   const [dragOverTrackId, setDragOverTrackId] = useState(null);
+  const [clipContextMenu, setClipContextMenu] = useState(null); // { x, y, clip, trackId }
+  const [trackContextMenu, setTrackContextMenu] = useState(null); // { x, y, track }
   
   const { tracks, pixelsPerSecond, currentTime, totalDuration, isPlaying } = state;
   
   const trackHeaderWidth = 160;
   const timelineWidth = totalDuration * pixelsPerSecond;
+
+  useEffect(() => {
+    const closeMenus = () => {
+      setClipContextMenu(null);
+      setTrackContextMenu(null);
+    };
+    window.addEventListener('click', closeMenus);
+    return () => window.removeEventListener('click', closeMenus);
+  }, []);
 
   const handleDragOver = (e) => {
     e.preventDefault();
@@ -31,17 +42,46 @@ export default function Timeline() {
       const dragData = JSON.parse(dataStr);
       const item = state.mediaItems.find(m => m.id === dragData.id) || dragData;
 
-      if (track.id === 'track_bg') {
-        if (item.type === 'video') {
-          actions.setBackgroundVideo(item);
-          actions.addToast(`Set "${item.name}" as background video`, 'success');
+      // Compute drop X and startTime
+      const contentEl = e.currentTarget.querySelector('.timeline-track__content');
+      let startTime = 0;
+      if (contentEl) {
+        const contentRect = contentEl.getBoundingClientRect();
+        const dropX = e.clientX - contentRect.left;
+        startTime = Math.max(0, dropX / pixelsPerSecond);
+      }
+
+      if (track.type === 'video') {
+        if (item.type === 'video' || item.type === 'image') {
+          const newClip = {
+            id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            name: item.name,
+            startTime,
+            duration: item.duration || 5, // default 5s
+            color: track.color || '#444466',
+            path: item.path,
+            dataUrl: item.dataUrl,
+            type: item.type,
+          };
+          actions.addClipToTrack(track.id, newClip);
+          actions.addToast(`Added "${item.name}" to track`, 'success');
         } else {
-          actions.addToast('Mismatched media type. Drag a video file here.', 'warning');
+          actions.addToast('Mismatched media type. Drag a video/image file here.', 'warning');
         }
-      } else if (track.id === 'track_audio') {
+      } else if (track.type === 'audio') {
         if (item.type === 'audio') {
-          actions.setAudio(item);
-          actions.addToast(`Set "${item.name}" as dialogue audio`, 'success');
+          const newClip = {
+            id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            name: item.name,
+            startTime,
+            duration: item.duration || 5, // default 5s
+            color: track.color || '#00e5ff',
+            path: item.path,
+            dataUrl: item.dataUrl,
+            type: 'audio',
+          };
+          actions.addClipToTrack(track.id, newClip);
+          actions.addToast(`Added "${item.name}" to track`, 'success');
         } else {
           actions.addToast('Mismatched media type. Drag an audio file here.', 'warning');
         }
@@ -61,7 +101,6 @@ export default function Timeline() {
   // ─── Ruler ticks ───
   const generateRulerTicks = () => {
     const ticks = [];
-    // Determine interval based on zoom level
     let interval = 1;
     if (pixelsPerSecond < 20) interval = 5;
     else if (pixelsPerSecond < 40) interval = 2;
@@ -139,10 +178,16 @@ export default function Timeline() {
         const dt = dx / pixelsPerSecond;
         const newStartTime = Math.max(0, draggingClip.origStartTime + dt);
         
-        // Find the block and update its timing
-        const block = state.dialogueBlocks.find(b => b.id === draggingClip.clipId);
-        if (block) {
+        const clipTrack = state.tracks.find(t => t.id === draggingClip.trackId);
+        if (clipTrack && clipTrack.type === 'character') {
           actions.updateBlockTiming(draggingClip.clipId, newStartTime, undefined);
+        } else {
+          const clip = clipTrack?.clips.find(c => c.id === draggingClip.clipId);
+          if (clip && clip.blockId) {
+            actions.updateBlockTiming(clip.blockId, newStartTime, undefined);
+          } else {
+            actions.updateClipTiming(draggingClip.trackId, draggingClip.clipId, newStartTime, undefined);
+          }
         }
       }
       
@@ -150,13 +195,37 @@ export default function Timeline() {
         const dx = e.clientX - resizingClip.startX;
         const dt = dx / pixelsPerSecond;
         
-        if (resizingClip.side === 'right') {
-          const newDuration = Math.max(0.2, resizingClip.origDuration + dt);
-          actions.updateBlockTiming(resizingClip.clipId, undefined, newDuration);
-        } else if (resizingClip.side === 'left') {
-          const newStartTime = Math.max(0, resizingClip.origStartTime + dt);
-          const newDuration = Math.max(0.2, resizingClip.origDuration - dt);
-          actions.updateBlockTiming(resizingClip.clipId, newStartTime, newDuration);
+        const clipTrack = state.tracks.find(t => t.id === resizingClip.trackId);
+        if (clipTrack && clipTrack.type === 'character') {
+          if (resizingClip.side === 'right') {
+            const newDuration = Math.max(0.2, resizingClip.origDuration + dt);
+            actions.updateBlockTiming(resizingClip.clipId, undefined, newDuration);
+          } else if (resizingClip.side === 'left') {
+            const newStartTime = Math.max(0, resizingClip.origStartTime + dt);
+            const newDuration = Math.max(0.2, resizingClip.origDuration - dt);
+            actions.updateBlockTiming(resizingClip.clipId, newStartTime, newDuration);
+          }
+        } else {
+          const clip = clipTrack?.clips.find(c => c.id === resizingClip.clipId);
+          if (clip && clip.blockId) {
+            if (resizingClip.side === 'right') {
+              const newDuration = Math.max(0.2, resizingClip.origDuration + dt);
+              actions.updateBlockTiming(clip.blockId, undefined, newDuration);
+            } else if (resizingClip.side === 'left') {
+              const newStartTime = Math.max(0, resizingClip.origStartTime + dt);
+              const newDuration = Math.max(0.2, resizingClip.origDuration - dt);
+              actions.updateBlockTiming(clip.blockId, newStartTime, newDuration);
+            }
+          } else {
+            if (resizingClip.side === 'right') {
+              const newDuration = Math.max(0.2, resizingClip.origDuration + dt);
+              actions.updateClipTiming(resizingClip.trackId, resizingClip.clipId, undefined, newDuration);
+            } else if (resizingClip.side === 'left') {
+              const newStartTime = Math.max(0, resizingClip.origStartTime + dt);
+              const newDuration = Math.max(0.2, resizingClip.origDuration - dt);
+              actions.updateClipTiming(resizingClip.trackId, resizingClip.clipId, newStartTime, newDuration);
+            }
+          }
         }
       }
     };
@@ -176,8 +245,255 @@ export default function Timeline() {
     }
   }, [draggingClip, resizingClip, pixelsPerSecond]);
 
+  const handleClipContextMenu = (e, clip, trackId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Estimate menu height as ~140px, width as 150px
+    const menuHeight = 140;
+    const menuWidth = 150;
+    let y = e.clientY;
+    let x = e.clientX;
+    
+    if (y + menuHeight > window.innerHeight) {
+      y = window.innerHeight - menuHeight - 10;
+    }
+    if (x + menuWidth > window.innerWidth) {
+      x = window.innerWidth - menuWidth - 10;
+    }
+
+    setClipContextMenu({
+      x,
+      y,
+      clip,
+      trackId
+    });
+  };
+
+  const handleTrackHeaderContextMenu = (e, track) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (track.type !== 'character') {
+      // Estimate menu height as ~100px, width as 150px
+      const menuHeight = 100;
+      const menuWidth = 150;
+      let y = e.clientY;
+      let x = e.clientX;
+      
+      if (y + menuHeight > window.innerHeight) {
+        y = window.innerHeight - menuHeight - 10;
+      }
+      if (x + menuWidth > window.innerWidth) {
+        x = window.innerWidth - menuWidth - 10;
+      }
+
+      setTrackContextMenu({
+        x,
+        y,
+        track
+      });
+    }
+  };
+
+  const handleDeleteClip = () => {
+    if (!clipContextMenu) return;
+    const { clip, trackId } = clipContextMenu;
+    
+    if (trackId.startsWith('track_') && !trackId.includes('bg') && !trackId.includes('audio')) {
+      const updatedBlocks = state.dialogueBlocks.filter(b => b.id !== clip.id);
+      actions.setBlocks(updatedBlocks);
+      actions.addToast(`Deleted dialogue block`, 'success');
+    } else {
+      actions.removeClipFromTrack(trackId, clip.id);
+      actions.addToast(`Deleted clip "${clip.name}"`, 'success');
+    }
+    setClipContextMenu(null);
+  };
+
+  const handleRenameClip = () => {
+    if (!clipContextMenu) return;
+    const { clip, trackId } = clipContextMenu;
+    const newName = prompt("Enter new name for the clip:", clip.name);
+    if (newName && newName.trim()) {
+      if (trackId.startsWith('track_') && !trackId.includes('bg') && !trackId.includes('audio')) {
+        actions.updateBlock(clip.id, { text: newName });
+      } else {
+        actions.updateClipProperties(trackId, clip.id, { name: newName });
+      }
+    }
+    setClipContextMenu(null);
+  };
+
+  const handleDeleteTrack = () => {
+    if (!trackContextMenu) return;
+    const { track } = trackContextMenu;
+    if (confirm(`Are you sure you want to delete track "${track.name}"?`)) {
+      actions.removeTrack(track.id);
+      actions.addToast(`Deleted track "${track.name}"`, 'success');
+    }
+    setTrackContextMenu(null);
+  };
+
+  const handleRenameTrack = () => {
+    if (!trackContextMenu) return;
+    const { track } = trackContextMenu;
+    const newName = prompt("Enter new name for track:", track.name);
+    if (newName && newName.trim()) {
+      actions.updateTrackProperties(track.id, { name: newName.trim() });
+      actions.addToast(`Renamed track!`, 'success');
+    }
+    setTrackContextMenu(null);
+  };
+
+  const handleRedoVoiceLine = async () => {
+    if (!clipContextMenu) return;
+    const { clip, trackId } = clipContextMenu;
+    setClipContextMenu(null);
+
+    const blockId = clip.blockId || (trackId.startsWith('track_') && !trackId.includes('bg') && !trackId.includes('audio') ? clip.id : null);
+    if (!blockId) return;
+
+    const block = state.dialogueBlocks.find(b => b.id === blockId);
+    if (!block) {
+      actions.addToast("Could not find dialogue block to redo.", "warning");
+      return;
+    }
+
+    const config = state.voiceConfigs?.[block.characterId];
+    if (!config || !config.refPath || !config.refText) {
+      actions.addToast(`Voice references not set for ${block.characterName}. Open the "Voice Clone" window and generate the voiceover first to set up characters.`, "warning");
+      return;
+    }
+
+    actions.addToast(`Redoing voice line for ${block.characterName}... 🎙️`, "info");
+
+    try {
+      const projectPath = window.electronAPI ? await window.electronAPI.getProjectPath() : '.';
+      const projectPathNormalized = projectPath.replace(/\\/g, '/');
+      const timestamp = Math.floor(Date.now() / 1000);
+      const voicesDir = `${projectPathNormalized}/dist/voices/redo_${timestamp}`;
+      const charName = block.characterName.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const savePath = `${voicesDir}/voice_${block.id}_${charName}.wav`;
+
+      // Call Flask backend clone API directly from frontend
+      const response = await fetch('http://127.0.0.1:5555/clone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: block.text,
+          language: 'English',
+          ref_audio: config.refPath,
+          ref_text: config.refText,
+          save_path: savePath
+        })
+      });
+
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || "Generation failed");
+      }
+
+      const generatedWavPath = data.wav_path;
+      const duration = data.duration;
+
+      // 1. Read buffer to create Blob URL for safe audio element playback in main window
+      let dataUrl = '';
+      if (window.electronAPI) {
+        const fileBuffer = await window.electronAPI.readFileBuffer(generatedWavPath);
+        if (fileBuffer && !fileBuffer.error && fileBuffer.byteLength > 0) {
+          const arrayBuffer = new ArrayBuffer(fileBuffer.byteLength);
+          new Uint8Array(arrayBuffer).set(fileBuffer);
+          const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+          dataUrl = URL.createObjectURL(blob);
+        }
+      }
+      
+      const audioUrl = dataUrl || `file:///${generatedWavPath.replace(/\\/g, '/')}`;
+
+      // 2. Add as a media item to the media library so it is saved/renameable
+      const name = generatedWavPath.split(/[\\/]/).pop();
+      const mediaItem = {
+        id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        name: name,
+        path: generatedWavPath,
+        ext: '.wav',
+        dataUrl: audioUrl,
+        type: 'audio',
+        isVoiceClone: true,
+        blockId: block.id,
+        characterId: block.characterId,
+        characterName: block.characterName,
+        duration: duration,
+      };
+      actions.addMedia(mediaItem);
+
+      // 3. Update the dialogue block duration (shifts subsequent timings automatically)
+      actions.updateBlockTiming(block.id, undefined, duration);
+
+      // 4. Update or add corresponding clip in audio tracks
+      let audioTrack = state.tracks.find(t => t.type === 'audio');
+      if (!audioTrack) {
+        audioTrack = { id: 'track_audio_1', color: '#00e5ff' };
+      }
+
+      // Check if clip for this block already exists on any audio track
+      let existingClip = null;
+      let existingTrackId = null;
+      for (const t of state.tracks) {
+        if (t.type === 'audio') {
+          const c = t.clips.find(clip => clip.blockId === block.id);
+          if (c) {
+            existingClip = c;
+            existingTrackId = t.id;
+            break;
+          }
+        }
+      }
+
+      if (existingClip && existingTrackId) {
+        // Update existing clip properties
+        actions.updateClipProperties(existingTrackId, existingClip.id, {
+          name: name,
+          path: generatedWavPath,
+          dataUrl: audioUrl,
+          duration: duration,
+        });
+      } else {
+        // Create new audio clip on track
+        const newClip = {
+          id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          name: name,
+          startTime: block.startTime,
+          duration: duration,
+          color: audioTrack.color || '#00e5ff',
+          path: generatedWavPath,
+          dataUrl: audioUrl,
+          type: 'audio',
+          blockId: block.id,
+        };
+        actions.addClipToTrack(audioTrack.id, newClip);
+      }
+
+      actions.addToast(`Redone voice line for ${block.characterName}! 🎙️`, "success");
+    } catch (err) {
+      console.error(err);
+      actions.addToast(`Failed to redo voice line: ${err.message}`, "error");
+    }
+  };
+
+  const handleAddVideoTrack = () => {
+    actions.addTrack('video', 'Video Track');
+    actions.addToast(`Added video track`, 'success');
+  };
+
+  const handleAddAudioTrack = () => {
+    actions.addTrack('audio', 'Audio Track');
+    actions.addToast(`Added audio track`, 'success');
+  };
+
   const handleTrackHeaderDragStart = (e, track) => {
     e.stopPropagation();
+
     e.dataTransfer.setData('text/plain', track.id);
     e.dataTransfer.effectAllowed = 'move';
     setDraggingTrackId(track.id);
@@ -281,6 +597,23 @@ export default function Timeline() {
           </button>
         </div>
 
+        <div className="toolbar__group">
+          <button
+            className="toolbar__btn"
+            onClick={handleAddVideoTrack}
+            style={{ height: 24, fontSize: 'var(--text-xs)' }}
+          >
+            + Video Track
+          </button>
+          <button
+            className="toolbar__btn"
+            onClick={handleAddAudioTrack}
+            style={{ height: 24, fontSize: 'var(--text-xs)' }}
+          >
+            + Audio Track
+          </button>
+        </div>
+
         <div className="timeline-zoom">
           <span style={{ fontSize: '10px', color: 'var(--text-disabled)' }}>−</span>
           <input
@@ -311,7 +644,7 @@ export default function Timeline() {
         className="timeline-tracks-container"
         ref={tracksContainerRef}
         onClick={handleTrackClick}
-        style={{ overflow: 'auto' }}
+        style={{ overflow: 'auto', paddingBottom: '120px' }}
       >
         {/* Playhead */}
         <div
@@ -354,6 +687,7 @@ export default function Timeline() {
               onDragLeave={handleTrackHeaderDragLeave}
               onDrop={(e) => handleTrackHeaderDrop(e, track)}
               onDragEnd={handleTrackHeaderDragEnd}
+              onContextMenu={(e) => handleTrackHeaderContextMenu(e, track)}
             >
               <div
                 className="timeline-track__header-color"
@@ -394,6 +728,7 @@ export default function Timeline() {
                     background: `linear-gradient(135deg, ${clip.color}cc, ${clip.color}88)`,
                   }}
                   onMouseDown={(e) => handleClipMouseDown(e, clip, track.id)}
+                  onContextMenu={(e) => handleClipContextMenu(e, clip, track.id)}
                 >
                   <div
                     className="timeline-clip__handle timeline-clip__handle--left"
@@ -420,6 +755,51 @@ export default function Timeline() {
           </div>
         )}
       </div>
+
+      {clipContextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            top: clipContextMenu.y,
+            left: clipContextMenu.x,
+            background: '#151520',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            boxShadow: '0 8px 16px rgba(0,0,0,0.6)',
+            borderRadius: 6,
+            zIndex: 10000,
+            padding: '4px 0',
+            minWidth: 120,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {(clipContextMenu.clip.blockId || (clipContextMenu.trackId.startsWith('track_') && !clipContextMenu.trackId.includes('bg') && !clipContextMenu.trackId.includes('audio'))) && (
+            <HoverMenuItem text="🎙️ Redo Voice Line" onClick={handleRedoVoiceLine} />
+          )}
+          <HoverMenuItem text="✏️ Rename Clip" onClick={handleRenameClip} />
+          <HoverMenuItem text="🗑️ Delete Clip" color="#ff4081" onClick={handleDeleteClip} />
+        </div>
+      )}
+
+      {trackContextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            top: trackContextMenu.y,
+            left: trackContextMenu.x,
+            background: '#151520',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            boxShadow: '0 8px 16px rgba(0,0,0,0.6)',
+            borderRadius: 6,
+            zIndex: 10000,
+            padding: '4px 0',
+            minWidth: 120,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <HoverMenuItem text="✏️ Rename Track" onClick={handleRenameTrack} />
+          <HoverMenuItem text="🗑️ Delete Track" color="#ff4081" onClick={handleDeleteTrack} />
+        </div>
+      )}
     </div>
   );
 }
@@ -485,4 +865,25 @@ function formatTime(seconds) {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function HoverMenuItem({ text, onClick, color }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      style={{
+        padding: '8px 12px',
+        fontSize: '12px',
+        cursor: 'pointer',
+        color: color || '#e3e3e8',
+        background: hover ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+        transition: 'background 0.2s',
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={onClick}
+    >
+      {text}
+    </div>
+  );
 }

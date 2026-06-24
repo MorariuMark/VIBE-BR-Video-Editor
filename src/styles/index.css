@@ -94,6 +94,55 @@
   --timeline-min-height: 180px;
 }
 
+body.theme-dark-gay {
+  /* 🌈 Dark-Gay colorful theme overrides 🌈 */
+  --bg-primary: #09030d; /* Deep dark purple-violet */
+  --bg-secondary: #12061b;
+  --bg-tertiary: #190a26;
+  --bg-elevated: #210d32;
+  --bg-hover: #2f1349;
+  --bg-active: #3e195f;
+  
+  --surface-1: #150923;
+  --surface-2: #1e0c32;
+  --surface-3: #281042;
+  
+  --border-accent: rgba(255, 0, 127, 0.4);
+  
+  --accent-primary: #ff007f; /* Hot neon pink */
+  --accent-primary-hover: #ff3399;
+  --accent-primary-glow: rgba(255, 0, 127, 0.25);
+  
+  --accent-secondary: #00f5ff; /* Neon cyan */
+  --accent-secondary-glow: rgba(0, 245, 255, 0.2);
+  
+  --accent-tertiary: #e040fb; /* Neon magenta */
+  
+  /* Vibrant rainbow track colors */
+  --track-color-1: #ff007f; /* Pink */
+  --track-color-2: #ff7700; /* Orange */
+  --track-color-3: #ffdd00; /* Yellow */
+  --track-color-4: #00ff66; /* Green */
+  --track-color-5: #00f5ff; /* Cyan */
+  --track-color-6: #9d4edd; /* Purple */
+  --track-color-7: #ff00ff; /* Magenta */
+  --track-color-8: #ff3333; /* Red */
+}
+
+/* Theme specific overrides for buttons/branding */
+body.theme-dark-gay .titlebar__logo {
+  background: linear-gradient(135deg, #ff007f, #00f5ff) !important;
+}
+
+body.theme-dark-gay .toolbar__btn--accent {
+  background: linear-gradient(135deg, #ff007f, #9d4edd) !important;
+}
+
+body.theme-dark-gay .media-tab--active {
+  color: #ff007f !important;
+  background: rgba(255, 0, 127, 0.15) !important;
+}
+
 /* ── Reset & Base ── */
 *, *::before, *::after {
   margin: 0;

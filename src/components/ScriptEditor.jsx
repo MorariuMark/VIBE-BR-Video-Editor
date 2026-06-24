@@ -128,8 +128,19 @@ export default function ScriptEditor() {
 
     try {
       const audioCtx = new AudioContext();
-      const response = await fetch(state.audioFile.dataUrl);
-      const arrayBuffer = await response.arrayBuffer();
+      let arrayBuffer;
+      if (window.electronAPI && state.audioFile.path) {
+        const fileBuffer = await window.electronAPI.readFileBuffer(state.audioFile.path);
+        if (fileBuffer && !fileBuffer.error && fileBuffer.byteLength > 0) {
+          arrayBuffer = new ArrayBuffer(fileBuffer.byteLength);
+          new Uint8Array(arrayBuffer).set(fileBuffer);
+        } else {
+          throw new Error(fileBuffer?.error || "Failed to read file buffer or buffer is empty");
+        }
+      } else {
+        const response = await fetch(state.audioFile.dataUrl);
+        arrayBuffer = await response.arrayBuffer();
+      }
       const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
       
       actions.setAudioBuffer(audioBuffer);
@@ -149,7 +160,7 @@ export default function ScriptEditor() {
     }
   };
 
-  const loadSampleScript = () => {
+  const loadSampleScript = async () => {
     const sample = `**Stewie:** Look, Peter, building a video editor inside Electron is easy if you don't choke the UI thread. You just overlay a fast canvas for the free-transform handles and offload the heavy rendering to a local FFmpeg binary.
 
 **Peter:** Yeah, well, what about the script parsing, smart guy? If I edit a paragraph or change a keyword, the whole timeline array has to recalculate its positions and shift every character animation block.
@@ -165,7 +176,76 @@ export default function ScriptEditor() {
     actions.setScript(sample);
     actions.parseScript(sample);
     setActiveTab('dialogue');
-    actions.addToast('Sample script loaded!', 'success');
+
+    if (window.electronAPI) {
+      try {
+        const projectPath = await window.electronAPI.getProjectPath();
+        const projectPathNormalized = projectPath.replace(/\\/g, '/');
+
+        // Character asset paths
+        const stewieImgPath = `${projectPathNormalized}/assets/characters/stewie.png`;
+        const peterImgPath = `${projectPathNormalized}/assets/characters/peter.png`;
+
+        // Voice reference audio files paths
+        const stewieWavPath = `${projectPathNormalized}/assets/default_voices/stewie_ref.wav`;
+        const peterWavPath = `${projectPathNormalized}/assets/default_voices/peter_ref.wav`;
+
+        // Reading files to populate character PNG base64 data URLs
+        const [stewieFileData, peterFileData] = await Promise.all([
+          window.electronAPI.readFile(stewieImgPath),
+          window.electronAPI.readFile(peterImgPath)
+        ]);
+
+        if (!stewieFileData.error) {
+          const stewieAsset = {
+            name: stewieFileData.name,
+            path: stewieFileData.path,
+            dataUrl: `data:${stewieFileData.mime};base64,${stewieFileData.data}`,
+          };
+          actions.assignCharacterAsset('char_stewie', stewieAsset);
+        } else {
+          console.warn("Stewie image file not found:", stewieFileData.error);
+        }
+
+        if (!peterFileData.error) {
+          const peterAsset = {
+            name: peterFileData.name,
+            path: peterFileData.path,
+            dataUrl: `data:${peterFileData.mime};base64,${peterFileData.data}`,
+          };
+          actions.assignCharacterAsset('char_peter', peterAsset);
+        } else {
+          console.warn("Peter image file not found:", peterFileData.error);
+        }
+
+        // Voice config references
+        const stewieRefText = "all this time spent keeping people from having sex and now i know how the catholic church feels buzzing";
+        const peterRefText = "going to stare at his wife's boobs so hide that when they both go into the kitchen together it will be discussed";
+
+        const defaultVoiceConfigs = {
+          char_stewie: {
+            type: 'default',
+            refPath: stewieWavPath,
+            refText: stewieRefText,
+            presetName: 'stewie'
+          },
+          char_peter: {
+            type: 'default',
+            refPath: peterWavPath,
+            refText: peterRefText,
+            presetName: 'peter'
+          }
+        };
+
+        actions.setVoiceConfigs(defaultVoiceConfigs);
+        actions.addToast('Sample script loaded with default voices and assets!', 'success');
+      } catch (err) {
+        console.error('Failed to load default assets and voices:', err);
+        actions.addToast(`Sample script loaded, but assets failed: ${err.message}`, 'warning');
+      }
+    } else {
+      actions.addToast('Sample script loaded!', 'success');
+    }
   };
 
   // Helper to retrieve character styles safely

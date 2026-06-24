@@ -29,27 +29,53 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
     ctx.fillRect(0, 0, width, height);
   }
 
-  // 2b. Draw background video first (always at the very bottom, beneath characters)
-  const bgTrack = state.tracks.find(track => track.type === 'video');
-  if (bgTrack && videoElement && !transparentBackground) {
-    const v = videoElement;
-    const canvasRatio = width / height;
-    const videoRatio = v.videoWidth / v.videoHeight || (state.canvasWidth / state.canvasHeight);
-    
-    let sx = 0, sy = 0, sw = v.videoWidth, sh = v.videoHeight;
-    if (videoRatio > canvasRatio) {
-      sw = sh * canvasRatio;
-      sx = (v.videoWidth - sw) / 2;
-    } else {
-      sh = sw / canvasRatio;
-      sy = (v.videoHeight - sh) / 2;
-    }
-    
-    try {
-      ctx.drawImage(v, sx, sy, sw, sh, 0, 0, width, height);
-    } catch (e) {
-      ctx.drawImage(v, 0, 0, width, height);
-    }
+  // 2b. Draw standard video tracks (bottom to top, in reverse order)
+  if (!transparentBackground) {
+    const videoTracks = state.tracks.filter(track => track.type === 'video');
+    [...videoTracks].reverse().forEach(track => {
+      const activeClip = track.clips.find(clip => time >= clip.startTime && time < clip.startTime + clip.duration);
+      if (!activeClip) return;
+
+      if (activeClip.type === 'video') {
+        const v = (videoElement && videoElement[activeClip.id]) || 
+                  (activeClip.id === 'clip_bg' && videoElement instanceof HTMLVideoElement ? videoElement : null);
+        if (v && v.readyState >= 2) {
+          const canvasRatio = width / height;
+          const videoRatio = v.videoWidth / v.videoHeight || (state.canvasWidth / state.canvasHeight);
+          
+          let sx = 0, sy = 0, sw = v.videoWidth, sh = v.videoHeight;
+          if (videoRatio > canvasRatio) {
+            sw = sh * canvasRatio;
+            sx = (v.videoWidth - sw) / 2;
+          } else {
+            sh = sw / canvasRatio;
+            sy = (v.videoHeight - sh) / 2;
+          }
+          
+          try {
+            ctx.drawImage(v, sx, sy, sw, sh, 0, 0, width, height);
+          } catch (e) {
+            ctx.drawImage(v, 0, 0, width, height);
+          }
+        }
+      } else if (activeClip.type === 'image') {
+        const img = loadedImages[activeClip.id];
+        if (img) {
+          const canvasRatio = width / height;
+          const imgRatio = img.width / img.height || (state.canvasWidth / state.canvasHeight);
+          
+          let sx = 0, sy = 0, sw = img.width, sh = img.height;
+          if (imgRatio > canvasRatio) {
+            sw = sh * canvasRatio;
+            sx = (img.width - sw) / 2;
+          } else {
+            sh = sw / canvasRatio;
+            sy = (img.height - sh) / 2;
+          }
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, width, height);
+        }
+      }
+    });
   }
   
   // 2c. Draw character tracks (reversed so top tracks in the timeline render on top of lower tracks)
