@@ -18,6 +18,7 @@ app = Flask(__name__)
 
 # Global model reference
 model = None
+model_type = None # "luxtts" or "qwen3tts_0.6b"
 
 # Create temp directories inside project
 temp_dir = os.path.join(project_dir, "dist", "voice_temp")
@@ -31,25 +32,56 @@ def status():
         "status": "active",
         "cuda_available": cuda_avail,
         "model_loaded": model is not None,
+        "model_type": model_type,
         "gpu_name": torch.cuda.get_device_name(0) if cuda_avail else "CPU",
         "vram_total": torch.cuda.get_device_properties(0).total_memory / (1024**3) if cuda_avail else 0
     })
 
 @app.route("/load", methods=["POST"])
 def load_model():
-    global model
+    global model, model_type
     try:
         import torch
-        if model is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            print(f"[Python Server] Loading LuxTTS model on {device}...", flush=True)
+        data = request.json or {}
+        requested_type = data.get("model_name", "luxtts")
+        
+        # If model is already loaded and matches the requested type, return success
+        if model is not None and model_type == requested_type:
+            return jsonify({"success": True, "message": f"Model {requested_type} already loaded"})
             
+        # Otherwise, if any model is loaded, unload it first
+        if model is not None:
+            print(f"[Python Server] Unloading existing {model_type} model to switch...", flush=True)
+            del model
+            model = None
+            model_type = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        
+        if requested_type == "qwen3tts_0.6b":
+            print(f"[Python Server] Loading Qwen3-TTS 0.6B model on {device}...", flush=True)
+            from qwen_tts import Qwen3TTSModel
+            dtype = torch.float32
+            model = Qwen3TTSModel.from_pretrained(
+                "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+                device_map=device,
+                dtype=dtype,
+                attn_implementation="eager"
+            )
+            model_type = "qwen3tts_0.6b"
+            print("[Python Server] Qwen3-TTS 0.6B model loaded successfully.", flush=True)
+        else: # default: luxtts
+            lux_device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"[Python Server] Loading LuxTTS model on {lux_device}...", flush=True)
             from zipvoice.luxvoice import LuxTTS
-            model = LuxTTS(device=device)
+            model = LuxTTS(device=lux_device)
+            model_type = "luxtts"
             print("[Python Server] LuxTTS model loaded successfully.", flush=True)
-            return jsonify({"success": True, "message": "Model loaded successfully"})
-        else:
-            return jsonify({"success": True, "message": "Model already loaded"})
+            
+        return jsonify({"success": True, "message": f"Model {requested_type} loaded successfully"})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -58,13 +90,14 @@ def load_model():
 
 @app.route("/unload", methods=["POST"])
 def unload_model():
-    global model
+    global model, model_type
     try:
         import torch
         if model is not None:
-            print("[Python Server] Unloading model...", flush=True)
+            print(f"[Python Server] Unloading {model_type} model...", flush=True)
             del model
             model = None
+            model_type = None
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -77,10 +110,20 @@ def unload_model():
 
 @app.route("/clone", methods=["POST"])
 def clone_voice():
-    global model
-    if model is None:
-        return jsonify({"success": False, "error": "Model not loaded. Call /load first."}), 400
+    global model, model_type
     
+    # Auto-load if not loaded
+    if model is None:
+        try:
+            import torch
+            lux_device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"[Python Server] Model not loaded. Auto-loading default LuxTTS model...", flush=True)
+            from zipvoice.luxvoice import LuxTTS
+            model = LuxTTS(device=lux_device)
+            model_type = "luxtts"
+        except Exception as load_err:
+            return jsonify({"success": False, "error": f"Model not loaded and auto-load failed: {str(load_err)}"}), 500
+            
     try:
         import torch
         data = request.json or {}
@@ -94,17 +137,29 @@ def clone_voice():
         if not ref_audio or not os.path.exists(ref_audio):
             return jsonify({"success": False, "error": f"Reference audio file not found: {ref_audio}"}), 400
 
-        print(f"[Python Server] Generating voice clone for text: '{text[:30]}...'", flush=True)
+        print(f"[Python Server] Generating voice clone ({model_type}) for text: '{text[:30]}...'", flush=True)
         
-        # Encode reference prompt
-        encoded_prompt = model.encode_prompt(ref_audio, prompt_text=ref_text)
-        
-        # Generate speech
-        wav = model.generate_speech(text, encoded_prompt)
-        
-        # Audio sample array conversion
-        audio_data = wav[0].numpy() if wav.ndim > 1 else wav.numpy()
-        sr = 48000
+        if model_type == "qwen3tts_0.6b":
+            wavs, sr = model.generate_voice_clone(
+                text=text,
+                language=language,
+                ref_audio=ref_audio,
+                ref_text=ref_text
+            )
+            audio_data = wavs[0]
+            if hasattr(audio_data, "cpu"):
+                audio_data = audio_data.cpu().numpy()
+            import numpy as np
+            audio_data = np.squeeze(audio_data)
+        else: # luxtts
+            # Encode reference prompt
+            encoded_prompt = model.encode_prompt(ref_audio, prompt_text=ref_text)
+            # Generate speech
+            wav = model.generate_speech(text, encoded_prompt)
+            # Audio sample array conversion
+            audio_data = wav[0].numpy() if wav.ndim > 1 else wav.numpy()
+            sr = 48000
+            
         duration = len(audio_data) / sr
         
         # Write to file

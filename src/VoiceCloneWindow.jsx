@@ -7,6 +7,7 @@ export default function VoiceCloneWindow() {
   const [gpuName, setGpuName] = useState('Detecting...');
   const [loadingModel, setLoadingModel] = useState(false);
   const [unloadingModel, setUnloadingModel] = useState(false);
+  const [selectedModel, setSelectedModel] = useState('luxtts');
 
   // Project state loaded from main process
   const [characters, setCharacters] = useState([]);
@@ -115,6 +116,9 @@ export default function VoiceCloneWindow() {
           const data = await res.json();
           setServerOnline(true);
           setModelLoaded(data.model_loaded);
+          if (data.model_loaded && data.model_type) {
+            setSelectedModel(data.model_type);
+          }
           setGpuName(data.gpu_name || 'CPU');
           setServerStatus('Online');
         } else {
@@ -135,13 +139,18 @@ export default function VoiceCloneWindow() {
   // 2. Model Controls
   const handleLoadModel = async () => {
     setLoadingModel(true);
-    addLog('System: Requesting model load into VRAM...');
+    const modelNameDisplay = selectedModel === 'qwen3tts_0.6b' ? 'Qwen3-TTS 0.6B' : 'LuxTTS 1.7B';
+    addLog(`System: Requesting ${modelNameDisplay} load into VRAM...`);
     try {
-      const res = await fetch('http://127.0.0.1:5555/load', { method: 'POST' });
+      const res = await fetch('http://127.0.0.1:5555/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_name: selectedModel })
+      });
       const data = await res.json();
       if (data.success) {
         setModelLoaded(true);
-        addLog('System: Qwen3-TTS 0.6B loaded successfully on GPU.');
+        addLog(`System: ${modelNameDisplay} loaded successfully.`);
       } else {
         addLog(`System Error: ${data.error}`);
       }
@@ -168,6 +177,35 @@ export default function VoiceCloneWindow() {
       addLog(`System Error: ${err.message}`);
     } finally {
       setUnloadingModel(false);
+    }
+  };
+
+  const handleModelChange = async (e) => {
+    const val = e.target.value;
+    setSelectedModel(val);
+    
+    if (modelLoaded) {
+      setLoadingModel(true);
+      const modelNameDisplay = val === 'qwen3tts_0.6b' ? 'Qwen3-TTS 0.6B' : 'LuxTTS 1.7B';
+      addLog(`System: Hot-swapping model to ${modelNameDisplay}...`);
+      try {
+        const res = await fetch('http://127.0.0.1:5555/load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model_name: val })
+        });
+        const data = await res.json();
+        if (data.success) {
+          addLog(`System: ${modelNameDisplay} loaded successfully.`);
+        } else {
+          addLog(`System Error: ${data.error}`);
+          setModelLoaded(false);
+        }
+      } catch (err) {
+        addLog(`System Error: ${err.message}`);
+      } finally {
+        setLoadingModel(false);
+      }
     }
   };
 
@@ -423,14 +461,19 @@ export default function VoiceCloneWindow() {
     try {
       // 1. Force load model
       if (!modelLoaded) {
-        addLog("System: Model not loaded. Loading now...");
-        const loadRes = await fetch('http://127.0.0.1:5555/load', { method: 'POST' });
+        const modelNameDisplay = selectedModel === 'qwen3tts_0.6b' ? 'Qwen3-TTS 0.6B' : 'LuxTTS 1.7B';
+        addLog(`System: Model not loaded. Loading ${modelNameDisplay} now...`);
+        const loadRes = await fetch('http://127.0.0.1:5555/load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model_name: selectedModel })
+        });
         const loadData = await loadRes.json();
         if (!loadData.success) {
           throw new Error(`Failed to load model: ${loadData.error}`);
         }
         setModelLoaded(true);
-        addLog("System: Model loaded successfully.");
+        addLog(`System: ${modelNameDisplay} loaded successfully.`);
       }
 
       const projectPath = window.electronAPI ? await window.electronAPI.getProjectPath() : '.';
@@ -797,6 +840,28 @@ export default function VoiceCloneWindow() {
         {serverOnline && (
           <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
             <span>GPU: <strong style={{ color: '#00e5ff' }}>{gpuName}</strong></span>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Model:</span>
+              <select
+                value={selectedModel}
+                onChange={handleModelChange}
+                disabled={loadingModel || generating || unloadingModel}
+                style={{
+                  background: '#1a1a24',
+                  color: '#ffffff',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '4px',
+                  padding: '4px 8px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  outline: 'none',
+                  fontFamily: 'inherit'
+                }}
+              >
+                <option value="luxtts">LuxTTS 1.7B Distilled (~1 GB VRAM)</option>
+                <option value="qwen3tts_0.6b">Qwen3-TTS 0.6B Base (~3 GB VRAM)</option>
+              </select>
+            </div>
             <div className="status-indicator">
               <span className={`dot ${modelLoaded ? 'dot--green' : 'dot--yellow'}`}></span>
               <span>Model Status: <strong>{modelLoaded ? 'Ready in VRAM' : 'Unloaded'}</strong></span>
