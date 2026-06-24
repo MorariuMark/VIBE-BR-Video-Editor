@@ -403,7 +403,7 @@ export default function PreviewCanvas() {
           ctx.letterSpacing = `${style.letterSpacing ?? 2}px`;
           
           const wordsPerLine = style.wordsPerLine ?? 3;
-          let activeText = getCaptionTextForTime(block.text, block.startTime, block.duration, state.currentTime, wordsPerLine) || '';
+          let activeText = getCaptionTextForTime(block.text, block.startTime, block.duration, state.currentTime, wordsPerLine, block.words) || '';
           if (!activeText) {
             ctx.restore();
           } else {
@@ -476,6 +476,7 @@ export default function PreviewCanvas() {
         }
 
         if (hitHandleIndex !== -1) {
+          actions.startDragHistory();
           setDragging({
             type: 'resize',
             elementId: state.selectedElementId,
@@ -512,7 +513,7 @@ export default function PreviewCanvas() {
       ctx.letterSpacing = `${style.letterSpacing ?? 2}px`;
       
       const wordsPerLine = style.wordsPerLine ?? 3;
-      let activeText = getCaptionTextForTime(block.text, block.startTime, block.duration, state.currentTime, wordsPerLine) || '';
+      let activeText = getCaptionTextForTime(block.text, block.startTime, block.duration, state.currentTime, wordsPerLine, block.words) || '';
       if (!activeText) {
         ctx.restore();
         continue;
@@ -554,6 +555,7 @@ export default function PreviewCanvas() {
 
       if (x >= rx && x <= rx + blockWidth && y >= ry && y <= ry + blockHeight) {
         actions.selectElement(captionKey);
+        actions.startDragHistory();
         setDragging({
           type: 'move',
           elementId: captionKey,
@@ -588,6 +590,7 @@ export default function PreviewCanvas() {
 
     if (clickedChar) {
       actions.selectElement(clickedChar.id);
+      actions.startDragHistory();
       setDragging({
         type: 'move',
         elementId: clickedChar.id,
@@ -634,6 +637,7 @@ export default function PreviewCanvas() {
 
   const handleCanvasMouseUp = () => {
     setDragging(null);
+    actions.endDragHistory();
   };
 
   const handleCanvasWheel = (e) => {

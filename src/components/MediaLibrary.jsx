@@ -262,8 +262,7 @@ export default function MediaLibrary() {
     }
   };
 
-  const handleAutoApplyVoice = (item) => {
-    // 1. Find dialogue block
+  const resolveBlockForVoice = (item) => {
     let block = state.dialogueBlocks.find(b => b.id === item.blockId);
     if (!block && item.name) {
       const match = item.name.match(/voice_(\d+)_/);
@@ -274,38 +273,53 @@ export default function MediaLibrary() {
         }
       }
     }
+    return block;
+  };
 
+  const handleAutoApplyVoice = (item) => {
+    const block = resolveBlockForVoice(item);
     if (!block) {
       actions.addToast("Could not find matching dialogue block for this voice clone.", "warning");
       return;
     }
 
-    // 2. Set dialogue block duration to audio's duration, shifting subsequent blocks
-    const duration = item.duration || 3.0;
-    actions.updateBlockTiming(block.id, undefined, duration);
-
-    // 3. Find the first audio track
-    let audioTrack = state.tracks.find(t => t.type === 'audio');
-    if (!audioTrack) {
-      audioTrack = { id: 'track_audio_1', color: '#00e5ff' };
-    }
-
-    // 4. Create clip on this audio track that is linked to the blockId
-    const newClip = {
-      id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    actions.applyVoices([{
+      blockId: block.id,
+      duration: item.duration || 3.0,
+      words: item.words || [],
       name: item.name,
-      startTime: block.startTime,
-      duration: duration,
-      color: audioTrack.color || '#00e5ff',
       path: item.path,
       dataUrl: item.dataUrl,
-      type: 'audio',
-      blockId: block.id,
-    };
+    }]);
 
-    // Add clip to the track
-    actions.addClipToTrack(audioTrack.id, newClip);
     actions.addToast(`Applied voice to dialogue line of ${block.characterName}! 🎤`, "success");
+  };
+
+  const handleApplyAllVoices = () => {
+    const voiceItems = state.mediaItems.filter(item => item.isVoiceClone);
+    const voicesToApply = [];
+    
+    voiceItems.forEach(item => {
+      const block = resolveBlockForVoice(item);
+      if (block) {
+        voicesToApply.push({
+          blockId: block.id,
+          duration: item.duration || 3.0,
+          words: item.words || [],
+          name: item.name,
+          path: item.path,
+          dataUrl: item.dataUrl,
+        });
+      }
+    });
+
+    if (voicesToApply.length === 0) {
+      actions.addToast("No matching script dialogue lines found to apply these voice clips to.", "warning");
+      return;
+    }
+
+    actions.applyVoices(voicesToApply);
+    actions.addToast(`Applied all ${voicesToApply.length} voice clips to the timeline! 🎤`, "success");
   };
 
 
@@ -313,7 +327,28 @@ export default function MediaLibrary() {
     <div className="media-library panel">
       <div className="panel__header">
         <span className="panel__title">Media Library</span>
-        <div className="panel__actions">
+        <div className="panel__actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {(activeTab === 'audio' || activeTab === 'all') && state.mediaItems.some(m => m.isVoiceClone) && (
+            <button 
+              className="panel__action-btn" 
+              onClick={handleApplyAllVoices}
+              style={{ 
+                fontSize: '11px', 
+                padding: '4px 8px', 
+                borderRadius: '4px', 
+                background: '#00e5ff', 
+                color: '#060609', 
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                border: 'none',
+                height: 'auto',
+                lineHeight: '1.4'
+              }}
+              title="Apply all voice clips to dialogue tracks"
+            >
+              ⚡ Apply All
+            </button>
+          )}
           <button className="panel__action-btn" onClick={handleImport} title="Import Files">
             +
           </button>

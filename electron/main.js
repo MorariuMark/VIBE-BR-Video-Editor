@@ -469,6 +469,9 @@ ipcMain.handle('start-frame-export', async (event, { settings, audioPath, backgr
 
     console.log('[Main] Spawn FFmpeg (Frame Stream):', ffmpegPath, args.join(' '));
     exportProcess = spawn(ffmpegPath, args);
+    exportProcess.stdin.on('error', (err) => {
+      console.warn('[Main] FFmpeg stdin write error ignored (write EOF):', err.message);
+    });
     exportStderr = '';
     exportResolve = resolve;
 

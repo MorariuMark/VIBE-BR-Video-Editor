@@ -144,6 +144,7 @@ export default function Timeline() {
     if (e.target.classList.contains('timeline-clip__handle')) return;
     e.stopPropagation();
     
+    actions.startDragHistory();
     actions.selectClip(clip.id);
     
     const rect = e.currentTarget.parentElement.getBoundingClientRect();
@@ -159,6 +160,7 @@ export default function Timeline() {
   // ─── Clip resizing ───
   const handleResizeMouseDown = (e, clip, trackId, side) => {
     e.stopPropagation();
+    actions.startDragHistory();
     
     setResizingClip({
       clipId: clip.id,
@@ -233,6 +235,7 @@ export default function Timeline() {
     const handleMouseUp = () => {
       setDraggingClip(null);
       setResizingClip(null);
+      actions.endDragHistory();
     };
 
     if (draggingClip || resizingClip) {
@@ -395,6 +398,7 @@ export default function Timeline() {
 
       const generatedWavPath = data.wav_path;
       const duration = data.duration;
+      const words = data.words || [];
 
       // 1. Read buffer to create Blob URL for safe audio element playback in main window
       let dataUrl = '';
@@ -424,11 +428,13 @@ export default function Timeline() {
         characterId: block.characterId,
         characterName: block.characterName,
         duration: duration,
+        words: words,
       };
       actions.addMedia(mediaItem);
 
       // 3. Update the dialogue block duration (shifts subsequent timings automatically)
       actions.updateBlockTiming(block.id, undefined, duration);
+      actions.updateBlock(block.id, { words: words });
 
       // 4. Update or add corresponding clip in audio tracks
       let audioTrack = state.tracks.find(t => t.type === 'audio');

@@ -707,8 +707,36 @@ export default function ScriptEditor() {
                   value={style.shadowOffsetY}
                   onChange={(e) => updateStyle(selectedChar.id, 'shadowOffsetY', parseInt(e.target.value) || 0)}
                 />
-              </div>
             </div>
+          </div>
+        </div>
+
+          <div className="inspector-section-title">Word Highlights</div>
+          <div className="inspector-section">
+            <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 8 }}>
+              <input
+                type="checkbox"
+                id="enableHighlight"
+                checked={style.enableHighlight !== false}
+                onChange={(e) => updateStyle(selectedChar.id, 'enableHighlight', e.target.checked)}
+              />
+              <label htmlFor="enableHighlight" className="form-label" style={{ margin: 0, cursor: 'pointer' }}>Highlight Active Word</label>
+            </div>
+
+            {(style.enableHighlight !== false) && (
+              <div className="form-group">
+                <label className="form-label">Highlight Color</label>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    type="color"
+                    className="form-color-picker"
+                    value={style.highlightColor || '#ffd21e'}
+                    onChange={(e) => updateStyle(selectedChar.id, 'highlightColor', e.target.value)}
+                  />
+                  <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)' }}>{style.highlightColor || '#ffd21e'}</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       );

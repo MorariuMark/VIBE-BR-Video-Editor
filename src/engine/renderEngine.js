@@ -1,20 +1,192 @@
 import { getAnimatedTransform, getActiveBlocks } from './animationEngine';
 
-export function getCaptionTextForTime(text, startTime, duration, currentTime, wordsPerLine = 3) {
-  const words = text.split(/\s+/).filter(w => w.length > 0);
-  if (words.length === 0) return '';
-  
-  const chunks = [];
-  for (let i = 0; i < words.length; i += wordsPerLine) {
-    chunks.push(words.slice(i, i + wordsPerLine).join(' '));
+export function alignWords(scriptWords, whisperWords) {
+  if (!scriptWords || scriptWords.length === 0) return [];
+  if (!whisperWords || whisperWords.length === 0) {
+    return scriptWords.map(w => ({ text: w, start: 0, end: 0 }));
   }
-  
-  const numChunks = chunks.length;
-  const chunkDuration = duration / numChunks;
+
+  const n = scriptWords.length;
+  const m = whisperWords.length;
+
+  const dp = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
+  const parent = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
+
+  for (let i = 0; i <= n; i++) {
+    dp[i][0] = i * 2;
+    parent[i][0] = 2; // insert script word
+  }
+  for (let j = 0; j <= m; j++) {
+    dp[0][j] = j * 2;
+    parent[0][j] = 1; // delete whisper word
+  }
+
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      const w1 = scriptWords[i - 1].toLowerCase().replace(/[^\w]/g, '');
+      const w2 = whisperWords[j - 1].text.toLowerCase().replace(/[^\w]/g, '');
+      
+      const matchCost = (w1 === w2) ? 0 : 1;
+
+      const costMatch = dp[i - 1][j - 1] + matchCost;
+      const costDeleteWhisper = dp[i][j - 1] + 2;
+      const costInsertScript = dp[i - 1][j] + 2;
+
+      let minCost = costMatch;
+      let op = 0; // match or substitute
+
+      if (costDeleteWhisper < minCost) {
+        minCost = costDeleteWhisper;
+        op = 1;
+      }
+      if (costInsertScript < minCost) {
+        minCost = costInsertScript;
+        op = 2;
+      }
+
+      dp[i][j] = minCost;
+      parent[i][j] = op;
+    }
+  }
+
+  const aligned = [];
+  let i = n;
+  let j = m;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && parent[i][j] === 0) {
+      aligned.push({
+        text: scriptWords[i - 1],
+        start: whisperWords[j - 1].start,
+        end: whisperWords[j - 1].end,
+      });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || parent[i][j] === 1)) {
+      j--;
+    } else {
+      aligned.push({
+        text: scriptWords[i - 1],
+        start: -1,
+        end: -1,
+      });
+      i--;
+    }
+  }
+
+  aligned.reverse();
+
+  // Interpolate missing timestamps
+  for (let k = 0; k < aligned.length; k++) {
+    if (aligned[k].start === -1) {
+      let prevEnd = 0;
+      for (let prev = k - 1; prev >= 0; prev--) {
+        if (aligned[prev].end !== -1) {
+          prevEnd = aligned[prev].end;
+          break;
+        }
+      }
+
+      let nextStart = 0;
+      for (let next = k + 1; next < aligned.length; next++) {
+        if (aligned[next].start !== -1) {
+          nextStart = aligned[next].start;
+          break;
+        }
+      }
+
+      if (nextStart > prevEnd) {
+        aligned[k].start = prevEnd;
+        aligned[k].end = prevEnd + (nextStart - prevEnd) / 2;
+      } else {
+        aligned[k].start = prevEnd;
+        aligned[k].end = prevEnd + 0.3;
+      }
+    }
+  }
+
+  return aligned;
+}
+
+export function getCaptionActiveWordInfo(text, startTime, duration, currentTime, wordsPerLine = 3, blockWords = null) {
   const elapsed = currentTime - startTime;
-  const chunkIndex = Math.floor(elapsed / chunkDuration);
-  const activeIndex = Math.max(0, Math.min(numChunks - 1, chunkIndex));
-  return chunks[activeIndex];
+  
+  const scriptWords = text.split(/\s+/).filter(w => w.length > 0);
+  if (scriptWords.length === 0) return { text: '', activeWordIndex: -1 };
+
+  if (blockWords && blockWords.length > 0) {
+    const alignedWords = alignWords(scriptWords, blockWords);
+    let activeWordIndex = -1;
+    
+    // Find active word based on timing relative to block start
+    for (let i = 0; i < alignedWords.length; i++) {
+      const w = alignedWords[i];
+      if (elapsed >= w.start && elapsed <= w.end) {
+        activeWordIndex = i;
+        break;
+      }
+    }
+    
+    // Fallback: if in a gap, find the last word that has ended
+    if (activeWordIndex === -1) {
+      for (let i = 0; i < alignedWords.length; i++) {
+        const w = alignedWords[i];
+        if (elapsed >= w.end) {
+          activeWordIndex = i;
+        } else {
+          break;
+        }
+      }
+    }
+    
+    // Default to the first word if we somehow didn't match anything
+    if (activeWordIndex === -1) {
+      activeWordIndex = 0;
+    }
+    
+    const chunks = [];
+    for (let i = 0; i < alignedWords.length; i += wordsPerLine) {
+      chunks.push(alignedWords.slice(i, i + wordsPerLine));
+    }
+    
+    const chunkIndex = Math.floor(activeWordIndex / wordsPerLine);
+    const activeChunkIndex = Math.max(0, Math.min(chunks.length - 1, chunkIndex));
+    const activeChunk = chunks[activeChunkIndex] || [];
+    
+    const activeWordIndexInChunk = activeWordIndex - (activeChunkIndex * wordsPerLine);
+    
+    return {
+      text: activeChunk.map(w => w.text).join(' '),
+      activeWordIndex: activeWordIndexInChunk,
+    };
+  } else {
+    // Linear fallback
+    const chunks = [];
+    for (let i = 0; i < scriptWords.length; i += wordsPerLine) {
+      chunks.push(scriptWords.slice(i, i + wordsPerLine));
+    }
+    
+    const numChunks = chunks.length;
+    const chunkDuration = duration / numChunks;
+    const chunkIndex = Math.floor(elapsed / chunkDuration);
+    const activeChunkIndex = Math.max(0, Math.min(numChunks - 1, chunkIndex));
+    const activeChunk = chunks[activeChunkIndex] || [];
+    
+    const elapsedWithinChunk = elapsed - activeChunkIndex * chunkDuration;
+    const wordDuration = chunkDuration / Math.max(1, activeChunk.length);
+    const wordIndexInChunk = Math.floor(elapsedWithinChunk / wordDuration);
+    const activeWordIndexInChunk = Math.max(0, Math.min(activeChunk.length - 1, wordIndexInChunk));
+    
+    return {
+      text: activeChunk.join(' '),
+      activeWordIndex: activeWordIndexInChunk,
+    };
+  }
+}
+
+export function getCaptionTextForTime(text, startTime, duration, currentTime, wordsPerLine = 3, blockWords = null) {
+  const info = getCaptionActiveWordInfo(text, startTime, duration, currentTime, wordsPerLine, blockWords);
+  return info ? info.text : '';
 }
 
 export function drawFrame(ctx, { state, time, width, height, loadedImages, videoElement, drawHandles, transparentBackground }) {
@@ -189,16 +361,19 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
         lineHeight: 1.4,
         wordsPerLine: 3,
         caseMode: 'uppercase',
+        enableHighlight: true,
+        highlightColor: '#ffd21e',
       }),
       ...(block.textStyle || {})
     };
 
     const wordsPerLine = style.wordsPerLine ?? 3;
-    let activeText = getCaptionTextForTime(block.text, block.startTime, block.duration, time, wordsPerLine);
-    if (!activeText) {
+    const activeWordInfo = getCaptionActiveWordInfo(block.text, block.startTime, block.duration, time, wordsPerLine, block.words);
+    if (!activeWordInfo || !activeWordInfo.text) {
       ctx.restore();
       return;
     }
+    let activeText = activeWordInfo.text;
 
     // Apply Case Mode
     if (style.caseMode === 'uppercase') {
@@ -255,6 +430,7 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
+    let runningWordIdx = 0;
     // ─── Text Drawing Passes (Shadow -> Glow -> Stroke -> Fill) ───
     lines.forEach((line, i) => {
       const lineY = ry + padding + i * lineHeight + lineHeight / 2;
@@ -291,9 +467,40 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
         ctx.strokeText(line, displayCx, lineY);
       }
 
-      // Pass 4: Core Text Fill
-      ctx.fillStyle = style.color || '#ffffff';
-      ctx.fillText(line, displayCx, lineY);
+      // Pass 4: Core Text Fill (word-by-word with highlight support)
+      const prevAlign = ctx.textAlign;
+      ctx.textAlign = 'left';
+
+      const lineWidth = ctx.measureText(line).width;
+      const lineStartX = displayCx - lineWidth / 2;
+      const lineWords = line.split(' ');
+
+      lineWords.forEach((word, idx) => {
+        const prefix = lineWords.slice(0, idx).join(' ') + (idx > 0 ? ' ' : '');
+        let displayPrefix = prefix;
+        let displayWord = word;
+        if (style.caseMode === 'uppercase') {
+          displayPrefix = displayPrefix.toUpperCase();
+          displayWord = displayWord.toUpperCase();
+        } else if (style.caseMode === 'lowercase') {
+          displayPrefix = displayPrefix.toLowerCase();
+          displayWord = displayWord.toLowerCase();
+        }
+
+        const prefixWidth = ctx.measureText(displayPrefix).width;
+        const wordX = lineStartX + prefixWidth;
+
+        const isHighlightEnabled = style.enableHighlight !== false;
+        const isActive = isHighlightEnabled && (runningWordIdx === activeWordInfo.activeWordIndex);
+        const highlightCol = style.highlightColor || '#ffd21e';
+
+        ctx.fillStyle = isActive ? highlightCol : (style.color || '#ffffff');
+        ctx.fillText(displayWord, wordX, lineY);
+
+        runningWordIdx++;
+      });
+
+      ctx.textAlign = prevAlign;
     });
 
     ctx.restore();
@@ -322,7 +529,7 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
           ...(block.textStyle || {})
         };
         const wordsPerLine = style.wordsPerLine ?? 3;
-        let activeText = getCaptionTextForTime(block.text, block.startTime, block.duration, time, wordsPerLine) || '';
+        let activeText = getCaptionTextForTime(block.text, block.startTime, block.duration, time, wordsPerLine, block.words) || '';
         
         if (style.caseMode === 'uppercase') {
           activeText = activeText.toUpperCase();

@@ -58,6 +58,13 @@ const initialState = {
   
   // Voice configurations per character
   voiceConfigs: {},
+
+  // History state for undo/redo
+  history: {
+    past: [],
+    future: [],
+    dragStartSnapshot: null,
+  },
 };
 
 // ─── Action Types ───
@@ -111,10 +118,23 @@ const ActionTypes = {
   UPDATE_CLIP_TIMING: 'UPDATE_CLIP_TIMING',
   UPDATE_CLIP_PROPERTIES: 'UPDATE_CLIP_PROPERTIES',
   SET_VOICE_CONFIGS: 'SET_VOICE_CONFIGS',
+
+  UNDO: 'UNDO',
+  REDO: 'REDO',
+  START_DRAG_HISTORY: 'START_DRAG_HISTORY',
+  END_DRAG_HISTORY: 'END_DRAG_HISTORY',
+  BATCH_APPLY_VOICES: 'BATCH_APPLY_VOICES',
 };
 
-// ─── Reducer ───
-function projectReducer(state, action) {
+// ─── Helpers ───
+function recalculateTotalDuration(blocks) {
+  if (!blocks || blocks.length === 0) return 30;
+  const lastBlock = blocks[blocks.length - 1];
+  return Math.max(1, lastBlock.startTime + lastBlock.duration + 0.3);
+}
+
+// ─── Core Reducer ───
+function coreProjectReducer(state, action) {
   switch (action.type) {
     case ActionTypes.SET_SCRIPT:
       return { ...state, scriptText: action.payload };
@@ -128,14 +148,8 @@ function projectReducer(state, action) {
         return existing ? { ...char, asset: existing.asset, textStyle: existing.textStyle || char.textStyle } : char;
       });
       
-      // Generate timeline tracks
-      const tracks = generateTracksFromBlocks(blocks, mergedCharacters, state);
-      
-      // Calculate total duration
-      const lastBlock = blocks[blocks.length - 1];
-      const totalDuration = lastBlock
-        ? Math.max(state.totalDuration, lastBlock.startTime + lastBlock.duration + 2)
-        : state.totalDuration;
+      const totalDuration = recalculateTotalDuration(blocks);
+      const tracks = generateTracksFromBlocks(blocks, mergedCharacters, { ...state, totalDuration, tracks: [] });
       
       return {
         ...state,
@@ -150,8 +164,9 @@ function projectReducer(state, action) {
       const blocks = state.dialogueBlocks.map(b =>
         b.id === action.payload.id ? { ...b, ...action.payload.changes } : b
       );
-      const tracks = generateTracksFromBlocks(blocks, state.characters, state);
-      return { ...state, dialogueBlocks: blocks, tracks };
+      const totalDuration = recalculateTotalDuration(blocks);
+      const tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration });
+      return { ...state, dialogueBlocks: blocks, totalDuration, tracks };
     }
     
     case ActionTypes.UPDATE_BLOCK_TIMING: {
@@ -163,13 +178,16 @@ function projectReducer(state, action) {
       if (idx >= 0) {
         blocks = recalculateTimings(blocks, idx);
       }
-      const tracks = generateTracksFromBlocks(blocks, state.characters, state);
-      return { ...state, dialogueBlocks: blocks, tracks };
+      const totalDuration = recalculateTotalDuration(blocks);
+      const tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration });
+      return { ...state, dialogueBlocks: blocks, totalDuration, tracks };
     }
     
     case ActionTypes.SET_BLOCKS: {
-      const tracks = generateTracksFromBlocks(action.payload, state.characters, state);
-      return { ...state, dialogueBlocks: action.payload, tracks };
+      const blocks = action.payload;
+      const totalDuration = recalculateTotalDuration(blocks);
+      const tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration });
+      return { ...state, dialogueBlocks: blocks, totalDuration, tracks };
     }
     
     case ActionTypes.ADD_CHARACTER: {
@@ -280,6 +298,7 @@ function projectReducer(state, action) {
               path: video.path,
               dataUrl: video.dataUrl,
               type: 'video',
+              isDefaultDuration: true,
             }] : [],
           };
         }
@@ -367,6 +386,7 @@ function projectReducer(state, action) {
               ...clip,
               startTime: startTime ?? clip.startTime,
               duration: duration ?? clip.duration,
+              isDefaultDuration: false,
             };
           }),
         };
@@ -451,9 +471,239 @@ function projectReducer(state, action) {
     case ActionTypes.SET_VOICE_CONFIGS:
       return { ...state, voiceConfigs: { ...(state.voiceConfigs || {}), ...action.payload } };
     
+    case ActionTypes.BATCH_APPLY_VOICES: {
+      const items = action.payload; // array of { blockId, duration, words, name, path, dataUrl }
+      if (!items || items.length === 0) return state;
+
+      let blocks = [...state.dialogueBlocks];
+      let tracks = [...state.tracks];
+
+      items.forEach(item => {
+        const blockIdx = blocks.findIndex(b => b.id === item.blockId);
+        if (blockIdx === -1) return;
+
+        blocks[blockIdx] = {
+          ...blocks[blockIdx],
+          duration: item.duration,
+          words: item.words || [],
+        };
+        blocks = recalculateTimings(blocks, blockIdx);
+      });
+
+      let audioTrackIdx = tracks.findIndex(t => t.type === 'audio');
+      if (audioTrackIdx === -1) {
+        tracks.push({
+          id: 'track_audio_1',
+          name: 'Audio 1',
+          type: 'audio',
+          color: '#00e5ff',
+          clips: [],
+        });
+        audioTrackIdx = tracks.length - 1;
+      }
+
+      tracks = tracks.map((track, tIdx) => {
+        if (track.type !== 'audio') return track;
+
+        let clips = [...track.clips];
+
+        items.forEach(item => {
+          const correspondingBlock = blocks.find(b => b.id === item.blockId);
+          if (!correspondingBlock) return;
+
+          const existingClipIdx = clips.findIndex(c => c.blockId === item.blockId);
+          if (existingClipIdx !== -1) {
+            clips[existingClipIdx] = {
+              ...clips[existingClipIdx],
+              name: item.name,
+              path: item.path,
+              dataUrl: item.dataUrl,
+              startTime: correspondingBlock.startTime,
+              duration: item.duration,
+            };
+          } else if (tIdx === audioTrackIdx) {
+            clips.push({
+              id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              name: item.name,
+              startTime: correspondingBlock.startTime,
+              duration: item.duration,
+              color: track.color || '#00e5ff',
+              path: item.path,
+              dataUrl: item.dataUrl,
+              type: 'audio',
+              blockId: item.blockId,
+            });
+          }
+        });
+
+        return { ...track, clips };
+      });
+
+      const totalDuration = recalculateTotalDuration(blocks);
+      tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration, tracks });
+
+      return {
+        ...state,
+        dialogueBlocks: blocks,
+        tracks,
+        totalDuration,
+      };
+    }
+    
     default:
       return state;
   }
+}
+
+// ─── History & Undo/Redo Wrapper Reducer ───
+const UNDOABLE_ACTIONS = new Set([
+  'SET_SCRIPT',
+  'PARSE_SCRIPT',
+  'UPDATE_BLOCK',
+  'UPDATE_BLOCK_TIMING',
+  'SET_BLOCKS',
+  'ADD_CHARACTER',
+  'UPDATE_CHARACTER',
+  'REMOVE_CHARACTER',
+  'ASSIGN_CHARACTER_ASSET',
+  'ADD_MEDIA',
+  'REMOVE_MEDIA',
+  'RENAME_MEDIA',
+  'SET_BACKGROUND_VIDEO',
+  'SET_AUDIO',
+  'UPDATE_CHARACTER_STYLE',
+  'ADD_TRACK',
+  'REMOVE_TRACK',
+  'UPDATE_TRACK_PROPERTIES',
+  'ADD_CLIP_TO_TRACK',
+  'REMOVE_CLIP_FROM_TRACK',
+  'UPDATE_CLIP_TIMING',
+  'UPDATE_CLIP_PROPERTIES',
+  'SET_VOICE_CONFIGS',
+  'BATCH_APPLY_VOICES',
+]);
+
+function getProjectSnapshot(state) {
+  return {
+    projectName: state.projectName,
+    mediaItems: state.mediaItems,
+    scriptText: state.scriptText,
+    dialogueBlocks: state.dialogueBlocks,
+    characters: state.characters,
+    tracks: state.tracks,
+    totalDuration: state.totalDuration,
+    characterTransforms: state.characterTransforms,
+    audioFile: state.audioFile,
+    backgroundVideo: state.backgroundVideo,
+    voiceConfigs: state.voiceConfigs,
+  };
+}
+
+function projectReducer(state, action) {
+  if (action.type === ActionTypes.UNDO) {
+    const { past, future, dragStartSnapshot } = state.history;
+    if (past.length === 0) return state;
+    
+    const previous = past[past.length - 1];
+    const newPast = past.slice(0, past.length - 1);
+    const currentSnapshot = getProjectSnapshot(state);
+    
+    return {
+      ...state,
+      ...previous,
+      history: {
+        past: newPast,
+        future: [currentSnapshot, ...future],
+        dragStartSnapshot,
+      }
+    };
+  }
+  
+  if (action.type === ActionTypes.REDO) {
+    const { past, future, dragStartSnapshot } = state.history;
+    if (future.length === 0) return state;
+    
+    const next = future[0];
+    const newFuture = future.slice(1);
+    const currentSnapshot = getProjectSnapshot(state);
+    
+    return {
+      ...state,
+      ...next,
+      history: {
+        past: [...past, currentSnapshot],
+        future: newFuture,
+        dragStartSnapshot,
+      }
+    };
+  }
+  
+  if (action.type === ActionTypes.START_DRAG_HISTORY) {
+    const currentSnapshot = getProjectSnapshot(state);
+    return {
+      ...state,
+      history: {
+        ...state.history,
+        dragStartSnapshot: currentSnapshot,
+      }
+    };
+  }
+  
+  if (action.type === ActionTypes.END_DRAG_HISTORY) {
+    const { past, dragStartSnapshot } = state.history;
+    if (!dragStartSnapshot) return state;
+    
+    const currentSnapshot = getProjectSnapshot(state);
+    const hasChanged = JSON.stringify(currentSnapshot) !== JSON.stringify(dragStartSnapshot);
+    
+    if (hasChanged) {
+      const newPast = [...past, dragStartSnapshot];
+      if (newPast.length > 50) newPast.shift();
+      
+      return {
+        ...state,
+        history: {
+          past: newPast,
+          future: [],
+          dragStartSnapshot: null,
+        }
+      };
+    } else {
+      return {
+        ...state,
+        history: {
+          ...state.history,
+          dragStartSnapshot: null,
+        }
+      };
+    }
+  }
+
+  const shouldSaveHistory = UNDOABLE_ACTIONS.has(action.type);
+  const preSnapshot = shouldSaveHistory ? getProjectSnapshot(state) : null;
+
+  const nextState = coreProjectReducer(state, action);
+
+  if (shouldSaveHistory) {
+    const postSnapshot = getProjectSnapshot(nextState);
+    const hasChanged = JSON.stringify(preSnapshot) !== JSON.stringify(postSnapshot);
+    
+    if (hasChanged) {
+      const newPast = [...state.history.past, preSnapshot];
+      if (newPast.length > 50) newPast.shift();
+      
+      return {
+        ...nextState,
+        history: {
+          past: newPast,
+          future: [],
+          dragStartSnapshot: state.history.dragStartSnapshot,
+        }
+      };
+    }
+  }
+
+  return nextState;
 }
 
 /**
@@ -496,6 +746,11 @@ function generateTracksFromBlocks(blocks, characters, state) {
               duration: correspondingBlock.duration,
             };
           }
+        } else if (clip.id === 'clip_bg' && clip.isDefaultDuration) {
+          return {
+            ...clip,
+            duration: state.totalDuration,
+          };
         }
         return clip;
       }),
@@ -518,6 +773,7 @@ function generateTracksFromBlocks(blocks, characters, state) {
         path: state.backgroundVideo.path,
         dataUrl: state.backgroundVideo.dataUrl,
         type: 'video',
+        isDefaultDuration: true,
       }] : [],
     });
     
@@ -726,6 +982,26 @@ export function ProjectProvider({ children }) {
 
     setVoiceConfigs: useCallback((configs) => {
       dispatch({ type: ActionTypes.SET_VOICE_CONFIGS, payload: configs });
+    }, []),
+
+    undo: useCallback(() => {
+      dispatch({ type: ActionTypes.UNDO });
+    }, []),
+
+    redo: useCallback(() => {
+      dispatch({ type: ActionTypes.REDO });
+    }, []),
+
+    startDragHistory: useCallback(() => {
+      dispatch({ type: ActionTypes.START_DRAG_HISTORY });
+    }, []),
+
+    endDragHistory: useCallback(() => {
+      dispatch({ type: ActionTypes.END_DRAG_HISTORY });
+    }, []),
+
+    applyVoices: useCallback((items) => {
+      dispatch({ type: ActionTypes.BATCH_APPLY_VOICES, payload: items });
     }, []),
   };
 

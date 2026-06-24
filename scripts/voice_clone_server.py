@@ -19,6 +19,7 @@ app = Flask(__name__)
 # Global model reference
 model = None
 model_type = None # "luxtts" or "qwen3tts_0.6b"
+transcriber = None
 
 # Create temp directories inside project
 temp_dir = os.path.join(project_dir, "dist", "voice_temp")
@@ -174,10 +175,43 @@ def clone_voice():
         sf.write(wav_path, audio_data, sr, subtype='PCM_16')
         
         print(f"[Python Server] Generated WAV saved to {wav_path} (duration: {duration:.2f}s)", flush=True)
+
+        # Transcribe audio for word-level timestamps
+        words = []
+        try:
+            active_transcriber = None
+            if model_type == "luxtts" and hasattr(model, "transcriber"):
+                active_transcriber = model.transcriber
+            else:
+                global transcriber
+                if transcriber is None:
+                    trans_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+                    print(f"[Python Server] Loading local Whisper transcriber for Qwen3...", flush=True)
+                    from transformers import pipeline
+                    transcriber = pipeline("automatic-speech-recognition", model="openai/whisper-tiny", device=trans_device)
+                active_transcriber = transcriber
+
+            if active_transcriber is not None:
+                transcription_result = active_transcriber(wav_path, return_timestamps="word")
+                for chunk in transcription_result.get("chunks", []):
+                    ts = chunk.get("timestamp")
+                    if ts is not None and ts[0] is not None and ts[1] is not None:
+                        words.append({
+                            "text": chunk.get("text", "").strip(),
+                            "start": float(ts[0]),
+                            "end": float(ts[1])
+                        })
+                print(f"[Python Server] Transcribed {len(words)} word timestamps.", flush=True)
+        except Exception as trans_err:
+            import traceback
+            traceback.print_exc()
+            print(f"[Python Server] Failed to transcribe word timestamps: {str(trans_err)}", flush=True)
+
         return jsonify({
             "success": True,
             "wav_path": wav_path,
-            "duration": duration
+            "duration": duration,
+            "words": words
         })
         
     except Exception as e:

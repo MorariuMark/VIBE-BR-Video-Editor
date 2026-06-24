@@ -59,6 +59,36 @@ function AppContent() {
   }, [leftWidth, rightWidth, timelineHeight]);
 
   useEffect(() => {
+    const handleKeyDown = (e) => {
+      const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+      if (isCmdOrCtrl) {
+        const activeEl = document.activeElement;
+        if (
+          activeEl &&
+          (activeEl.tagName === 'INPUT' ||
+            activeEl.tagName === 'TEXTAREA' ||
+            activeEl.hasAttribute('contenteditable'))
+        ) {
+          return;
+        }
+
+        if (e.key.toLowerCase() === 'z') {
+          e.preventDefault();
+          actions.undo();
+          actions.addToast('Undo ↩️', 'info');
+        } else if (e.key.toLowerCase() === 'y') {
+          e.preventDefault();
+          actions.redo();
+          actions.addToast('Redo ↪️', 'info');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [actions]);
+
+  useEffect(() => {
     if (window.electronAPI && window.electronAPI.onTimelineVoicesUpdated) {
       window.electronAPI.onTimelineVoicesUpdated(async (payload) => {
         const voices = payload.voices || [];
@@ -74,7 +104,7 @@ function AppContent() {
         actions.addToast(`Adding ${voices.length} AI Voiceover clips to Media Library... 🎤`, 'info');
 
         for (let i = 0; i < voices.length; i++) {
-          const { audioPath, characterName, blockId, characterId, duration } = voices[i];
+          const { audioPath, characterName, blockId, characterId, duration, words } = voices[i];
           const name = audioPath.split(/[\\/]/).pop();
           
           let dataUrl = '';
@@ -106,6 +136,7 @@ function AppContent() {
             characterId,
             characterName,
             duration: duration || 0,
+            words: words || [],
           };
 
           // Add to media library only

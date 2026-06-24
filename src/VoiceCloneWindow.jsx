@@ -1,13 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 export default function VoiceCloneWindow() {
   const [serverOnline, setServerOnline] = useState(false);
   const [modelLoaded, setModelLoaded] = useState(false);
   const [serverStatus, setServerStatus] = useState('Checking...');
   const [gpuName, setGpuName] = useState('Detecting...');
+  const [vramTotal, setVramTotal] = useState(null); // GB, null = unknown
   const [loadingModel, setLoadingModel] = useState(false);
   const [unloadingModel, setUnloadingModel] = useState(false);
   const [selectedModel, setSelectedModel] = useState('luxtts');
+  const [autoUnload, setAutoUnload] = useState(false); // false = keep model in VRAM after generation
+  const [splitPercent, setSplitPercent] = useState(60); // left panel % width
+  const mainLayoutRef = useRef(null);
+  const isDraggingRef = useRef(false);
 
   // Project state loaded from main process
   const [characters, setCharacters] = useState([]);
@@ -120,6 +125,9 @@ export default function VoiceCloneWindow() {
             setSelectedModel(data.model_type);
           }
           setGpuName(data.gpu_name || 'CPU');
+          if (data.vram_total != null) {
+            setVramTotal(data.vram_total);
+          }
           setServerStatus('Online');
         } else {
           setServerOnline(false);
@@ -135,6 +143,48 @@ export default function VoiceCloneWindow() {
     const interval = setInterval(checkServer, 3000);
     return () => clearInterval(interval);
   }, [characters.length]);
+
+  // Beforeunload: free GPU VRAM when window is closed
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Use keepalive: true so the fetch completes even if the page is unloading
+      try {
+        navigator.sendBeacon('http://127.0.0.1:5555/unload', '{}');
+      } catch (e) {
+        fetch('http://127.0.0.1:5555/unload', { method: 'POST', keepalive: true }).catch(() => {});
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
+  // Draggable resizer for the main layout panels
+  const handleResizerMouseDown = useCallback((e) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    const container = mainLayoutRef.current;
+    if (!container) return;
+
+    const onMouseMove = (ev) => {
+      if (!isDraggingRef.current) return;
+      const rect = container.getBoundingClientRect();
+      const newPercent = Math.max(25, Math.min(75, ((ev.clientX - rect.left) / rect.width) * 100));
+      setSplitPercent(newPercent);
+    };
+
+    const onMouseUp = () => {
+      isDraggingRef.current = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, []);
 
   // 2. Model Controls
   const handleLoadModel = async () => {
@@ -324,6 +374,7 @@ export default function VoiceCloneWindow() {
           characterId: block.characterId,
           duration: block.duration,
           index: idx,
+          words: block.words || [],
         }));
 
         const syncRes = await window.electronAPI.applyTimelineVoices({
@@ -513,6 +564,7 @@ export default function VoiceCloneWindow() {
 
         updatedBlocks[i].wavPath = data.wav_path;
         updatedBlocks[i].duration = data.duration; // Update block with actual speaking duration
+        updatedBlocks[i].words = data.words || [];
 
         setGenerationProgress(((i + 1) / dialogueBlocks.length) * 100);
       }
@@ -524,9 +576,13 @@ export default function VoiceCloneWindow() {
         dialogueBlocks: updatedBlocks
       });
 
-      // 3. Offer to unload model from VRAM automatically to free up memory
-      addLog("GPU: Freeing up VRAM automatically...");
-      await handleUnloadModel();
+      // 3. Conditionally unload model from VRAM depending on user preference
+      if (autoUnload) {
+        addLog("GPU: Auto-unload is ON — freeing VRAM...");
+        await handleUnloadModel();
+      } else {
+        addLog("GPU: Auto-unload is OFF — model stays loaded in VRAM for re-use.");
+      }
 
     } catch (err) {
       addLog(`Fatal Error: ${err.message}`);
@@ -642,21 +698,46 @@ export default function VoiceCloneWindow() {
         .main-layout {
           display: flex;
           flex: 1;
-          gap: 20px;
+          gap: 0;
           min-height: 0;
         }
 
         .left-panel {
-          flex: 1.2;
           display: flex;
           flex-direction: column;
           gap: 16px;
           overflow-y: auto;
-          padding-right: 8px;
+          padding-right: 12px;
+          min-width: 0;
+        }
+
+        .resizer-bar {
+          width: 6px;
+          flex-shrink: 0;
+          cursor: col-resize;
+          background: transparent;
+          position: relative;
+          margin: 0 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .resizer-bar::after {
+          content: '';
+          display: block;
+          width: 2px;
+          height: 60px;
+          background: rgba(255, 255, 255, 0.12);
+          border-radius: 2px;
+          transition: background 0.2s;
+        }
+
+        .resizer-bar:hover::after {
+          background: #00e5ff;
         }
 
         .right-panel {
-          flex: 0.8;
           display: flex;
           flex-direction: column;
           gap: 16px;
@@ -665,6 +746,7 @@ export default function VoiceCloneWindow() {
           border-radius: 8px;
           padding: 16px;
           min-height: 0;
+          min-width: 0;
         }
 
         .card {
@@ -838,8 +920,13 @@ export default function VoiceCloneWindow() {
         </div>
         
         {serverOnline && (
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-            <span>GPU: <strong style={{ color: '#00e5ff' }}>{gpuName}</strong></span>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span>
+              GPU: <strong style={{ color: '#00e5ff' }}>{gpuName}</strong>
+              {vramTotal != null && (
+                <span style={{ color: '#a0a0b0', fontSize: '12px', marginLeft: 4 }}>({vramTotal.toFixed(1)} GB VRAM)</span>
+              )}
+            </span>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Model:</span>
               <select
@@ -864,8 +951,25 @@ export default function VoiceCloneWindow() {
             </div>
             <div className="status-indicator">
               <span className={`dot ${modelLoaded ? 'dot--green' : 'dot--yellow'}`}></span>
-              <span>Model Status: <strong>{modelLoaded ? 'Ready in VRAM' : 'Unloaded'}</strong></span>
+              <span>Model: <strong>{modelLoaded ? 'In VRAM' : 'Unloaded'}</strong></span>
             </div>
+            {/* Auto-Unload Toggle */}
+            <label
+              title="When ON, the model is unloaded from GPU VRAM after generation finishes. When OFF, it stays loaded for faster re-generation."
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5, fontSize: '12px',
+                cursor: 'pointer', color: autoUnload ? '#ffd740' : '#a0a0b0',
+                userSelect: 'none'
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={autoUnload}
+                onChange={e => setAutoUnload(e.target.checked)}
+                style={{ accentColor: '#ffd740' }}
+              />
+              Auto-Unload
+            </label>
             {modelLoaded ? (
               <button className="btn btn--secondary" onClick={handleUnloadModel} disabled={unloadingModel || generating}>
                 {unloadingModel ? 'Clearing...' : 'Release GPU VRAM'}
@@ -880,10 +984,10 @@ export default function VoiceCloneWindow() {
       </div>
 
       {/* Layout */}
-      <div className="main-layout">
+      <div className="main-layout" ref={mainLayoutRef}>
         
         {/* Left Config Panel */}
-        <div className="left-panel">
+        <div className="left-panel" style={{ width: `${splitPercent}%`, flexShrink: 0 }}>
           {characters.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-secondary)' }}>
               No characters found in active script. Set up a dialogue in the main workspace first.
@@ -1003,8 +1107,11 @@ export default function VoiceCloneWindow() {
           )}
         </div>
 
+        {/* Draggable Resizer */}
+        <div className="resizer-bar" onMouseDown={handleResizerMouseDown} title="Drag to resize panels" />
+
         {/* Right Output & Progress Panel */}
-        <div className="right-panel">
+        <div className="right-panel" style={{ flex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 className="card__title" style={{ color: '#fff' }}>Audio & Captions Sync</h3>
           </div>

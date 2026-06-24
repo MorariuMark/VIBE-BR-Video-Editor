@@ -31,6 +31,8 @@ export const DEFAULT_TEXT_STYLE = {
   lineHeight: 1.4,
   wordsPerLine: 3,
   caseMode: 'uppercase', // default uppercase for typical brain rot style
+  enableHighlight: true,
+  highlightColor: '#ffd21e',
 };
 
 /**
