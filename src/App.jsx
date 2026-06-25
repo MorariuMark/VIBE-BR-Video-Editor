@@ -75,11 +75,11 @@ function AppContent() {
         if (e.key.toLowerCase() === 'z') {
           e.preventDefault();
           actions.undo();
-          actions.addToast('Undo ↩️', 'info');
+          actions.addToast('Undo', 'info');
         } else if (e.key.toLowerCase() === 'y') {
           e.preventDefault();
           actions.redo();
-          actions.addToast('Redo ↪️', 'info');
+          actions.addToast('Redo', 'info');
         }
       }
     };
@@ -101,7 +101,7 @@ function AppContent() {
 
         if (voices.length === 0) return;
 
-        actions.addToast(`Adding ${voices.length} AI Voiceover clips to Media Library... 🎤`, 'info');
+        actions.addToast(`Adding ${voices.length} AI Voiceover clips to Media Library...`, 'info');
 
         for (let i = 0; i < voices.length; i++) {
           const { audioPath, characterName, blockId, characterId, duration, words } = voices[i];
@@ -143,7 +143,7 @@ function AppContent() {
           actions.addMedia(item);
         }
 
-        actions.addToast(`All ${voices.length} voiceover clips added to Media Library! 🎤`, 'success');
+        actions.addToast(`All ${voices.length} voiceover clips added to Media Library!`, 'success');
       });
 
       return () => {

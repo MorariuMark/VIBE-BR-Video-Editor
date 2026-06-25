@@ -95,7 +95,7 @@
 }
 
 body.theme-dark-gay {
-  /* 🌈 Dark-Gay colorful theme overrides 🌈 */
+  /* Dark-Gay colorful theme overrides */
   --bg-primary: #09030d; /* Deep dark purple-violet */
   --bg-secondary: #12061b;
   --bg-tertiary: #190a26;
@@ -129,6 +129,56 @@ body.theme-dark-gay {
   --track-color-8: #ff3333; /* Red */
 }
 
+body.theme-premiere {
+  /* Adobe Premiere Pro 2026 Theme */
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #141414;
+  --bg-tertiary: #1a1a1a;
+  --bg-elevated: #282828;
+  --bg-hover: #323232;
+  --bg-active: #1473e6;
+  
+  --surface-1: #222222;
+  --surface-2: #2a2a2a;
+  --surface-3: #323232;
+  
+  --border-subtle: #2b2b2b;
+  --border-default: #323232;
+  --border-strong: #3e3e3e;
+  --border-accent: #1473e6;
+  
+  --text-primary: #e6e6e6;
+  --text-secondary: #b3b3b3;
+  --text-tertiary: #8f8f8f;
+  --text-disabled: #5c5c5c;
+  
+  --accent-primary: #1473e6;
+  --accent-primary-hover: #2c80ff;
+  --accent-primary-glow: rgba(20, 115, 230, 0.15);
+  
+  --accent-secondary: #1473e6;
+  --accent-secondary-glow: rgba(20, 115, 230, 0.15);
+  --accent-tertiary: #9d4edd;
+  
+  /* Timeline track colors - Professional Premiere look */
+  --track-color-1: #2d5a88;
+  --track-color-2: #2d7a6e;
+  --track-color-3: #7b4f73;
+  --track-color-4: #8a6a42;
+  --track-color-5: #3b704c;
+  --track-color-6: #965345;
+  --track-color-7: #4e5a88;
+  --track-color-8: #6f805a;
+  
+  /* Radius overrides for sharp, professional Premiere look */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  
+  --font-sans: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+}
+
 /* Theme specific overrides for buttons/branding */
 body.theme-dark-gay .titlebar__logo {
   background: linear-gradient(135deg, #ff007f, #00f5ff) !important;
@@ -141,6 +191,61 @@ body.theme-dark-gay .toolbar__btn--accent {
 body.theme-dark-gay .media-tab--active {
   color: #ff007f !important;
   background: rgba(255, 0, 127, 0.15) !important;
+}
+
+/* Premiere specific overrides */
+body.theme-premiere .titlebar__logo {
+  background: #1473e6 !important;
+  color: #ffffff !important;
+}
+
+body.theme-premiere .toolbar__btn--accent {
+  background: #1473e6 !important;
+  color: #ffffff !important;
+  border-radius: 2px;
+}
+
+body.theme-premiere .toolbar__btn--accent:hover {
+  background: #2c80ff !important;
+}
+
+body.theme-premiere .media-tab--active {
+  color: #1473e6 !important;
+  border-bottom: 2px solid #1473e6 !important;
+  background: rgba(20, 115, 230, 0.08) !important;
+}
+
+body.theme-premiere .editor-tab--active {
+  color: #ffffff !important;
+  border-bottom-color: #1473e6 !important;
+  background: rgba(20, 115, 230, 0.05) !important;
+}
+
+body.theme-premiere .panel__action-btn--apply-all {
+  background: #1473e6 !important;
+  color: #ffffff !important;
+}
+
+/* Apply All Button base class styling */
+.panel__action-btn--apply-all {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-secondary);
+  color: var(--bg-primary);
+  font-weight: bold;
+  cursor: pointer;
+  border: none;
+  height: auto;
+  line-height: 1.4;
+  transition: background 0.2s, color 0.2s, opacity 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.panel__action-btn--apply-all:hover {
+  opacity: 0.9;
 }
 
 /* ── Reset & Base ── */
@@ -1502,9 +1607,29 @@ html, body, #root {
   cursor: col-resize;
 }
 
+.resizer--h::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+  z-index: 15;
+}
+
 .resizer--v {
   height: 3px;
   cursor: row-resize;
+}
+
+.resizer--v::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -4px;
+  bottom: -4px;
+  z-index: 15;
 }
 
 /* ─── Style Inspector and Editor Tabs ─── */
@@ -1582,10 +1707,12 @@ html, body, #root {
 .form-row {
   display: flex;
   gap: var(--sp-3);
+  flex-wrap: wrap;
 }
 
 .form-row .form-group {
   flex: 1;
+  min-width: 110px;
 }
 
 .form-group {

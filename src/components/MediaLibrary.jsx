@@ -292,7 +292,7 @@ export default function MediaLibrary() {
       dataUrl: item.dataUrl,
     }]);
 
-    actions.addToast(`Applied voice to dialogue line of ${block.characterName}! 🎤`, "success");
+    actions.addToast(`Applied voice to dialogue line of ${block.characterName}!`, "success");
   };
 
   const handleApplyAllVoices = () => {
@@ -319,7 +319,7 @@ export default function MediaLibrary() {
     }
 
     actions.applyVoices(voicesToApply);
-    actions.addToast(`Applied all ${voicesToApply.length} voice clips to the timeline! 🎤`, "success");
+    actions.addToast(`Applied all ${voicesToApply.length} voice clips to the timeline!`, "success");
   };
 
 
@@ -330,23 +330,12 @@ export default function MediaLibrary() {
         <div className="panel__actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {(activeTab === 'audio' || activeTab === 'all') && state.mediaItems.some(m => m.isVoiceClone) && (
             <button 
-              className="panel__action-btn" 
+              className="panel__action-btn panel__action-btn--apply-all" 
               onClick={handleApplyAllVoices}
-              style={{ 
-                fontSize: '11px', 
-                padding: '4px 8px', 
-                borderRadius: '4px', 
-                background: '#00e5ff', 
-                color: '#060609', 
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                border: 'none',
-                height: 'auto',
-                lineHeight: '1.4'
-              }}
               title="Apply all voice clips to dialogue tracks"
             >
-              ⚡ Apply All
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8l-5-5z"/><polyline points="14 3 14 8 19 8"/></svg>
+              Apply All
             </button>
           )}
           <button className="panel__action-btn" onClick={handleImport} title="Import Files">
@@ -425,7 +414,8 @@ export default function MediaLibrary() {
                           onClick={(e) => { e.stopPropagation(); handleOptimizeVideo(item); }}
                           title="Optimize seek speed"
                         >
-                          ⚡ Optimize
+                          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 2 }}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                          Optimize
                         </button>
                       )
                     )}
@@ -470,7 +460,8 @@ export default function MediaLibrary() {
                         onClick={(e) => { e.stopPropagation(); handleAutoApplyVoice(item); }}
                         title="Auto-apply to dialogue track"
                       >
-                        ⚡ Apply
+                        <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 2 }}><polyline points="20 6 9 17 4 12"/></svg>
+                        Apply
                       </button>
                     )}
 
@@ -515,9 +506,9 @@ export default function MediaLibrary() {
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <HoverMenuItem text="📥 Export File" onClick={() => handleExportItem(contextMenu.item)} />
-          <HoverMenuItem text="✏️ Rename" onClick={() => handleRenameItem(contextMenu.item)} />
-          <HoverMenuItem text="🗑️ Delete" color="#ff4081" onClick={() => handleDeleteItem(contextMenu.item)} />
+          <HoverMenuItem text="Export File..." onClick={() => handleExportItem(contextMenu.item)} />
+          <HoverMenuItem text="Rename..." onClick={() => handleRenameItem(contextMenu.item)} />
+          <HoverMenuItem text="Delete" color="#ff4081" onClick={() => handleDeleteItem(contextMenu.item)} />
         </div>
       )}
     </div>

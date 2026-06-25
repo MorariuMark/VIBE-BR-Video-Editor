@@ -82,7 +82,7 @@ export default function ExportModal() {
           if (window.electronAPI.mixAudioClips) {
             const projectPath = await window.electronAPI.getProjectPath();
             tempAudioOutput = `${projectPath.replace(/\\/g, '/')}/dist/temp_mix_${Date.now()}.wav`;
-            actions.addToast('Mixing audio tracks... 🎤', 'info');
+            actions.addToast('Mixing audio tracks...', 'info');
             const mixRes = await window.electronAPI.mixAudioClips({
               clips: audioClips,
               outputPath: tempAudioOutput
@@ -136,7 +136,7 @@ export default function ExportModal() {
           window.electronAPI.removeExportProgress();
 
           if (result.success) {
-            actions.addToast('Export complete! 🎬', 'success');
+            actions.addToast('Export complete!', 'success');
           } else {
             actions.addToast(`Export failed: ${result.error?.substring(0, 120)}`, 'error');
           }
@@ -301,7 +301,7 @@ export default function ExportModal() {
         actions.setExportProgress(100);
 
         if (result.success) {
-          actions.addToast('Export complete! 🎬', 'success');
+          actions.addToast('Export complete!', 'success');
         } else {
           actions.addToast(`Export failed: ${result.error?.substring(0, 100)}`, 'error');
         }
@@ -328,7 +328,10 @@ export default function ExportModal() {
     <div className="modal-overlay" onClick={() => !state.isExporting && actions.setShowExportModal(false)}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">
-          <h2 className="modal__title">🎬 Export Video</h2>
+          <h2 className="modal__title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+            Export Video
+          </h2>
           {!state.isExporting && (
             <button className="modal__close" onClick={() => actions.setShowExportModal(false)}>
               ✕
@@ -447,18 +450,21 @@ export default function ExportModal() {
             lineHeight: '1.4'
           }}>
             {renderMethod === 'canvas' && (
-              <div>
-                🚀 <strong>GPU Canvas:</strong> Renders transparent frames and overlays them in FFmpeg. Fast GPU execution that **preserves all character animations and text glows**!
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M19 11v6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6m3 0V9a4 4 0 0 1 8 0v2M12 2v2M12 20v2M4 12H2M22 12h-2"/></svg>
+                <span><strong>GPU Canvas:</strong> Renders transparent frames and overlays them in FFmpeg. Fast GPU execution that **preserves all character animations and text glows**!</span>
               </div>
             )}
             {renderMethod === 'canvas-cpu' && (
-              <div>
-                💡 <strong>CPU Canvas:</strong> Seeks background video frame-by-frame. Export at <strong>30 FPS</strong> instead of 60 FPS to cut render time and memory usage in half!
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.73A1 1 0 0 0 14 18h-4a1 1 0 0 0-.74-.37l-.597-.73z"/></svg>
+                <span><strong>CPU Canvas:</strong> Seeks background video frame-by-frame. Export at <strong>30 FPS</strong> instead of 60 FPS to cut render time and memory usage in half!</span>
               </div>
             )}
             {renderMethod === 'native' && (
-              <div>
-                ⚡ <strong>Native Mode:</strong> Pure FFmpeg execution. High rendering speed, but skips canvas-specific entry/exit transitions and rich text effects.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span><strong>Native Mode:</strong> Pure FFmpeg execution. High rendering speed, but skips canvas-specific entry/exit transitions and rich text effects.</span>
               </div>
             )}
           </div>
@@ -493,8 +499,9 @@ export default function ExportModal() {
             Blocks: {state.dialogueBlocks.length} &middot; 
             Characters: {state.characters.length}
             {!state.backgroundVideo && (
-              <div style={{ color: 'var(--accent-warning)', marginTop: 4 }}>
-                ⚠ No background video set
+              <div style={{ color: 'var(--accent-warning)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0 }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span>No background video set</span>
               </div>
             )}
           </div>
@@ -507,7 +514,8 @@ export default function ExportModal() {
               onClick={handleCancelExport}
               style={{ width: '100%' }}
             >
-              🛑 Cancel Render
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4, display: 'inline-block', verticalAlign: 'middle' }}><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6"/></svg>
+              Cancel Render
             </button>
           ) : (
             <>
@@ -521,7 +529,8 @@ export default function ExportModal() {
                 className="btn btn--primary"
                 onClick={handleExport}
               >
-                🎬 Export
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 4, display: 'inline-block', verticalAlign: 'middle' }}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                Export
               </button>
             </>
           )}

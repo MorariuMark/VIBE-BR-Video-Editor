@@ -333,7 +333,7 @@ export default function ScriptEditor() {
           {/* Apply To Selector */}
           <div className="inspector-section" style={{ background: 'var(--accent-primary-glow)', borderColor: 'var(--border-accent)', padding: '10px 12px', gap: 6 }}>
             <label className="form-label" style={{ margin: 0 }}>Apply Style Changes To:</label>
-            <div style={{ display: 'flex', gap: 16 }}>
+            <div style={{ display: 'flex', gap: '8px 16px', flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 'var(--text-xs)', color: 'var(--text-primary)', userSelect: 'none' }}>
                 <input
                   type="radio"
@@ -430,7 +430,10 @@ export default function ScriptEditor() {
                     <span className="avatar-label truncate">{selectedChar.asset.name}</span>
                   </>
                 ) : (
-                  <span className="avatar-placeholder">📁 Click or drop PNG asset here</span>
+                  <span className="avatar-placeholder" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    Click or drop PNG asset here
+                  </span>
                 )}
               </div>
             </div>
@@ -1176,16 +1179,18 @@ export default function ScriptEditor() {
             <button
               className="keyword-add-btn"
               onClick={handleAutoTime}
-              style={{ width: '100%', marginLeft: 0, marginRight: 0 }}
+              style={{ width: '100%', marginLeft: 0, marginRight: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
             >
-              ⏱ Auto-Time
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Auto-Time
             </button>
             <button
               className="keyword-add-btn"
               onClick={handleSilenceDetect}
-              style={{ width: '100%', marginLeft: 0, marginRight: 0 }}
+              style={{ width: '100%', marginLeft: 0, marginRight: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
             >
-              🔊 Detect Silence
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              Detect Silence
             </button>
           </div>
         </div>
@@ -1210,8 +1215,9 @@ export default function ScriptEditor() {
                 <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
                   {state.scriptText.split(/\s+/).filter(w => w).length} words
                 </span>
-                <button className="btn btn--primary" onClick={handleParse} style={{ height: 28, fontSize: 'var(--text-xs)' }}>
-                  🔄 Parse Script
+                <button className="btn btn--primary" onClick={handleParse} style={{ height: 28, fontSize: 'var(--text-xs)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                  Parse Script
                 </button>
               </div>
             </>

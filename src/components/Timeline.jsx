@@ -368,7 +368,7 @@ export default function Timeline() {
       return;
     }
 
-    actions.addToast(`Redoing voice line for ${block.characterName}... 🎙️`, "info");
+    actions.addToast(`Redoing voice line for ${block.characterName}...`, "info");
 
     try {
       const projectPath = window.electronAPI ? await window.electronAPI.getProjectPath() : '.';
@@ -480,7 +480,7 @@ export default function Timeline() {
         actions.addClipToTrack(audioTrack.id, newClip);
       }
 
-      actions.addToast(`Redone voice line for ${block.characterName}! 🎙️`, "success");
+      actions.addToast(`Redone voice line for ${block.characterName}!`, "success");
     } catch (err) {
       console.error(err);
       actions.addToast(`Failed to redo voice line: ${err.message}`, "error");
@@ -779,10 +779,10 @@ export default function Timeline() {
           onClick={(e) => e.stopPropagation()}
         >
           {(clipContextMenu.clip.blockId || (clipContextMenu.trackId.startsWith('track_') && !clipContextMenu.trackId.includes('bg') && !clipContextMenu.trackId.includes('audio'))) && (
-            <HoverMenuItem text="🎙️ Redo Voice Line" onClick={handleRedoVoiceLine} />
+            <HoverMenuItem text="Redo Voice Line" onClick={handleRedoVoiceLine} />
           )}
-          <HoverMenuItem text="✏️ Rename Clip" onClick={handleRenameClip} />
-          <HoverMenuItem text="🗑️ Delete Clip" color="#ff4081" onClick={handleDeleteClip} />
+          <HoverMenuItem text="Rename Clip..." onClick={handleRenameClip} />
+          <HoverMenuItem text="Delete Clip" color="#ff4081" onClick={handleDeleteClip} />
         </div>
       )}
 
@@ -802,8 +802,8 @@ export default function Timeline() {
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <HoverMenuItem text="✏️ Rename Track" onClick={handleRenameTrack} />
-          <HoverMenuItem text="🗑️ Delete Track" color="#ff4081" onClick={handleDeleteTrack} />
+          <HoverMenuItem text="Rename Track..." onClick={handleRenameTrack} />
+          <HoverMenuItem text="Delete Track" color="#ff4081" onClick={handleDeleteTrack} />
         </div>
       )}
     </div>

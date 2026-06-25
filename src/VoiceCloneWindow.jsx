@@ -39,6 +39,29 @@ export default function VoiceCloneWindow() {
   const [generatedResult, setGeneratedResult] = useState(null);
   const audioRef = useRef(new Audio());
 
+  // Theme synchronization from local storage
+  useEffect(() => {
+    const applyTheme = () => {
+      const activeTheme = localStorage.getItem('theme') || 'default';
+      document.body.classList.remove('theme-dark-gay', 'theme-premiere');
+      if (activeTheme === 'dark-gay') {
+        document.body.classList.add('theme-dark-gay');
+      } else if (activeTheme === 'premiere') {
+        document.body.classList.add('theme-premiere');
+      }
+    };
+
+    applyTheme();
+
+    const handleStorageChange = (e) => {
+      if (e.key === 'theme') {
+        applyTheme();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
   // 1. Initial Load & Heartbeat
   useEffect(() => {
     // Read project state sent by main window
@@ -600,9 +623,9 @@ export default function VoiceCloneWindow() {
           display: flex;
           flex-direction: column;
           height: 100vh;
-          background: #060609;
-          color: #e3e3e8;
-          font-family: 'Outfit', 'Inter', sans-serif;
+          background: var(--bg-primary, #060609);
+          color: var(--text-primary, #e3e3e8);
+          font-family: var(--font-sans, 'Outfit', 'Inter', sans-serif);
           padding: 24px;
           box-sizing: border-box;
           overflow: hidden;
@@ -612,7 +635,7 @@ export default function VoiceCloneWindow() {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+          border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
           padding-bottom: 16px;
           margin-bottom: 20px;
         }
@@ -620,7 +643,7 @@ export default function VoiceCloneWindow() {
         .header__title {
           font-size: 20px;
           font-weight: 700;
-          color: #00e5ff;
+          color: var(--accent-primary, #00e5ff);
           margin: 0;
           display: flex;
           align-items: center;
@@ -628,9 +651,9 @@ export default function VoiceCloneWindow() {
         }
 
         .status-bar {
-          background: rgba(255, 255, 255, 0.03);
-          border: 1px solid rgba(255, 255, 255, 0.05);
-          border-radius: 8px;
+          background: var(--bg-secondary, rgba(255, 255, 255, 0.03));
+          border: 1px solid var(--border-default, rgba(255, 255, 255, 0.05));
+          border-radius: var(--radius-md, 8px);
           padding: 12px 16px;
           display: flex;
           justify-content: space-between;
@@ -657,11 +680,11 @@ export default function VoiceCloneWindow() {
         .dot--red { background: #ff4081; box-shadow: 0 0 8px #ff4081; }
 
         .btn {
-          background: #7c4dff;
+          background: var(--accent-primary, #7c4dff);
           color: white;
           border: none;
           padding: 6px 12px;
-          border-radius: 4px;
+          border-radius: var(--radius-sm, 4px);
           cursor: pointer;
           font-size: 12px;
           font-weight: 600;
@@ -669,25 +692,25 @@ export default function VoiceCloneWindow() {
         }
 
         .btn:hover {
-          background: #651fff;
+          background: var(--accent-primary-hover, #651fff);
         }
 
         .btn--secondary {
-          background: rgba(255, 255, 255, 0.08);
-          color: #e3e3e8;
+          background: var(--bg-elevated, rgba(255, 255, 255, 0.08));
+          color: var(--text-secondary, #e3e3e8);
         }
 
         .btn--secondary:hover {
-          background: rgba(255, 255, 255, 0.15);
+          background: var(--bg-hover, rgba(255, 255, 255, 0.15));
         }
 
         .btn--accent {
-          background: #00e5ff;
-          color: #060609;
+          background: var(--accent-secondary, #00e5ff);
+          color: var(--bg-primary, #060609);
         }
 
         .btn--accent:hover {
-          background: #00b0ff;
+          background: var(--accent-primary-hover, #00b0ff);
         }
 
         .btn:disabled {
@@ -728,31 +751,31 @@ export default function VoiceCloneWindow() {
           display: block;
           width: 2px;
           height: 60px;
-          background: rgba(255, 255, 255, 0.12);
+          background: var(--border-default, rgba(255, 255, 255, 0.12));
           border-radius: 2px;
           transition: background 0.2s;
         }
 
         .resizer-bar:hover::after {
-          background: #00e5ff;
+          background: var(--accent-primary, #00e5ff);
         }
 
         .right-panel {
           display: flex;
           flex-direction: column;
           gap: 16px;
-          background: rgba(255, 255, 255, 0.02);
-          border: 1px solid rgba(255, 255, 255, 0.04);
-          border-radius: 8px;
+          background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
+          border: 1px solid var(--border-default, rgba(255, 255, 255, 0.04));
+          border-radius: var(--radius-md, 8px);
           padding: 16px;
           min-height: 0;
           min-width: 0;
         }
 
         .card {
-          background: rgba(255, 255, 255, 0.02);
-          border: 1px solid rgba(255, 255, 255, 0.05);
-          border-radius: 8px;
+          background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
+          border: 1px solid var(--border-default, rgba(255, 255, 255, 0.05));
+          border-radius: var(--radius-md, 8px);
           padding: 16px;
           display: flex;
           flex-direction: column;
@@ -768,7 +791,7 @@ export default function VoiceCloneWindow() {
         .card__title {
           font-size: 14px;
           font-weight: 700;
-          color: #fff;
+          color: var(--text-primary, #fff);
           margin: 0;
           display: flex;
           align-items: center;
@@ -783,17 +806,17 @@ export default function VoiceCloneWindow() {
         }
 
         .form-control {
-          background: #0f0f15;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          color: #fff;
-          border-radius: 4px;
+          background: var(--bg-primary, #0f0f15);
+          border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.1));
+          color: var(--text-primary, #fff);
+          border-radius: var(--radius-sm, 4px);
           padding: 6px 10px;
           font-size: 13px;
           flex: 1;
         }
 
         .form-control:focus {
-          border-color: #00e5ff;
+          border-color: var(--accent-primary, #00e5ff);
           outline: none;
         }
 
@@ -808,15 +831,15 @@ export default function VoiceCloneWindow() {
         }
 
         .logs-container {
-          background: #020204;
-          border: 1px solid rgba(255, 255, 255, 0.05);
-          border-radius: 6px;
+          background: var(--bg-primary, #020204);
+          border: 1px solid var(--border-default, rgba(255, 255, 255, 0.05));
+          border-radius: var(--radius-sm, 6px);
           padding: 10px;
           flex: 1;
           overflow-y: auto;
           font-family: monospace;
           font-size: 12px;
-          color: #a0a0b0;
+          color: var(--text-secondary, #a0a0b0);
           display: flex;
           flex-direction: column;
         }
@@ -842,14 +865,14 @@ export default function VoiceCloneWindow() {
 
         .bar-outer {
           height: 8px;
-          background: rgba(255, 255, 255, 0.05);
+          background: var(--border-default, rgba(255, 255, 255, 0.05));
           border-radius: 4px;
           overflow: hidden;
         }
 
         .bar-inner {
           height: 100%;
-          background: linear-gradient(90deg, #7c4dff, #00e5ff);
+          background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary, #00e5ff));
           border-radius: 4px;
           transition: width 0.3s ease;
         }
@@ -864,17 +887,17 @@ export default function VoiceCloneWindow() {
 
         .script-item {
           padding: 8px 10px;
-          border-radius: 4px;
+          border-radius: var(--radius-sm, 4px);
           margin-bottom: 6px;
           font-size: 12px;
           line-height: 1.4;
-          background: rgba(255, 255, 255, 0.01);
-          border-left: 3px solid rgba(255, 255, 255, 0.1);
+          background: var(--bg-secondary, rgba(255, 255, 255, 0.01));
+          border-left: 3px solid var(--border-strong, rgba(255, 255, 255, 0.1));
         }
 
         .script-item--active {
-          background: rgba(124, 77, 255, 0.08);
-          border-left-color: #7c4dff;
+          background: var(--accent-primary-glow, rgba(124, 77, 255, 0.08));
+          border-left-color: var(--accent-primary, #7c4dff);
         }
 
         .script-item__char {
@@ -886,7 +909,7 @@ export default function VoiceCloneWindow() {
           width: 24px;
           height: 24px;
           border-radius: 50%;
-          background: rgba(255, 255, 255, 0.08);
+          background: var(--bg-elevated, rgba(255, 255, 255, 0.08));
           display: flex;
           align-items: center;
           justify-content: center;
@@ -896,8 +919,8 @@ export default function VoiceCloneWindow() {
         }
 
         .play-btn--active {
-          background: #00e5ff;
-          color: #060609;
+          background: var(--accent-secondary, #00e5ff);
+          color: var(--bg-primary, #060609);
         }
       `}</style>
 
@@ -1174,28 +1197,31 @@ export default function VoiceCloneWindow() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
               <button
                 className="btn btn--secondary"
-                style={{ width: '100%', padding: '10px', fontWeight: 'bold' }}
+                style={{ width: '100%', padding: '10px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                 onClick={handleDiscardResult}
                 disabled={generating}
               >
-                🗑️ Discard Generated Clips
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                Discard Generated Clips
               </button>
               <button
                 className="btn btn--success"
-                style={{ width: '100%', padding: '12px', fontSize: '14px', fontWeight: 'bold', background: '#00e676', color: '#060609', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                style={{ width: '100%', padding: '12px', fontSize: '14px', fontWeight: 'bold', background: '#00e676', color: '#060609', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                 onClick={handleApplyResult}
               >
-                ✅ Accept & Add to Media Library
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0 }}><polyline points="20 6 9 17 4 12"/></svg>
+                Accept & Add to Media Library
               </button>
             </div>
           ) : (
             <button
               className="btn btn--accent"
-              style={{ width: '100%', padding: '12px', fontSize: '14px', fontWeight: 'bold', marginBottom: '8px' }}
+              style={{ width: '100%', padding: '12px', fontSize: '14px', fontWeight: 'bold', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
               onClick={handleGenerateVoiceover}
               disabled={generating || !serverOnline}
             >
-              {generating ? '🎤 Running AI Voiceover...' : '🎤 Generate Voiceover'}
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0 }}><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+              {generating ? 'Running AI Voiceover...' : 'Generate Voiceover'}
             </button>
           )}
 

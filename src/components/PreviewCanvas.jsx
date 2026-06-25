@@ -676,8 +676,9 @@ export default function PreviewCanvas() {
           )}
 
           {preRenderProgress !== null ? (
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--accent-primary)', fontWeight: 'bold' }}>
-              ⚡ Pre-rendering: {preRenderProgress}%
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--accent-primary)', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0 }}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              Pre-rendering: {preRenderProgress}%
             </span>
           ) : (
             state.backgroundVideo && (
@@ -687,7 +688,8 @@ export default function PreviewCanvas() {
                 title="Pre-render background video frames into GPU memory for smooth playback"
                 style={{ fontSize: 'var(--text-xs)', padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4, width: 'auto', height: 22 }}
               >
-                ⚡ Pre-render {preRenderedFramesRef.current.length > 0 && '✓'}
+                <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0 }}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                Pre-render {preRenderedFramesRef.current.length > 0 && '✓'}
               </button>
             )
           )}
