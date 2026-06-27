@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useProject } from '../store/ProjectContext';
+import { getInterpolatedKeyframeTransform } from '../engine/animationEngine';
 
 /**
  * Script Editor & Inspector Panel
@@ -12,6 +13,9 @@ export default function ScriptEditor() {
   const [editingKeyword, setEditingKeyword] = useState(null);
   const [newKeywordName, setNewKeywordName] = useState('');
   const [styleTarget, setStyleTarget] = useState('character'); // 'character' | 'clip'
+  const [selectedCharacterId, setSelectedCharacterId] = useState('');
+  const [activeProp, setActiveProp] = useState('x'); // 'x' | 'y' | 'scale' | 'rotation' | 'opacity'
+  const [draggingKf, setDraggingKf] = useState(null);
   const textareaRef = useRef(null);
 
   const handleApplyAnimToAll = (characterId) => {
@@ -33,6 +37,27 @@ export default function ScriptEditor() {
       actions.addToast('Applied animation to all clips in project', 'success');
     }
   };
+
+  // Keydown delete keyframe listener
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
+          return;
+        }
+        if (state.selectedElementId && state.selectedKeyframeIndex !== null) {
+          const char = state.characters.find(c => c.id === state.selectedElementId);
+          if (char && char.keyframes && char.keyframes[state.selectedKeyframeIndex]) {
+            actions.removeCharacterKeyframe(char.id, state.selectedKeyframeIndex);
+            actions.selectKeyframe(null);
+            actions.addToast('Deleted keyframe', 'info');
+          }
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [state.selectedElementId, state.selectedKeyframeIndex, state.characters]);
 
   // Auto-switch tabs when elements are selected
   useEffect(() => {
@@ -220,7 +245,7 @@ export default function ScriptEditor() {
 
         // Voice config references
         const stewieRefText = "all this time spent keeping people from having sex and now i know how the catholic church feels buzzing";
-        const peterRefText = "going to stare at his wife's boobs so hide that when they both go into the kitchen together it will be discussed";
+        const peterRefText = "I'm gonna stare at his wife's boobs so hide that when they both go into the kitchen together it will be discussed";
 
         const defaultVoiceConfigs = {
           char_stewie: {
@@ -252,6 +277,7 @@ export default function ScriptEditor() {
   const getCharacterStyle = (char) => {
     return char?.textStyle || {
       fontFamily: 'Impact',
+      fontSize: 48,
       color: '#ffffff',
       strokeColor: '#000000',
       strokeWidth: 4,
@@ -263,7 +289,7 @@ export default function ScriptEditor() {
       glowBlur: 0,
       backgroundColor: 'rgba(0,0,0,0.7)',
       backgroundPadding: 10,
-      showBackground: true,
+      showBackground: false,
       letterSpacing: 2,
       lineHeight: 1.4,
       wordsPerLine: 3,
@@ -817,24 +843,226 @@ export default function ScriptEditor() {
   };
 
   const renderAnimations = () => {
-    if (!state.selectedClipId) {
+    const charId = selectedCharacterId || state.characters[0]?.id;
+    const character = state.characters.find(c => c.id === charId);
+
+    if (state.characters.length === 0) {
       return (
         <div className="empty-state" style={{ height: '80%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor" style={{ color: 'var(--text-disabled)', margin: '0 auto 16px' }}>
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
           </svg>
-          <div className="empty-state__title">No Clip Selected</div>
+          <div className="empty-state__title">No Characters Found</div>
           <div className="empty-state__desc" style={{ padding: '0 32px' }}>
-            Select a dialogue block in the Blocks list or timeline track to configure its transitions and sustained animations.
+            Parse a script first in the Script tab to generate characters for animation.
           </div>
         </div>
       );
     }
 
-    const block = state.dialogueBlocks.find(b => b.id === state.selectedClipId);
-    if (!block) return null;
+    if (!character) return null;
 
-    const anim = block.animation || {
+    const keyframes = character.keyframes || [];
+    const sortedKfs = [...keyframes].sort((a, b) => a.time - b.time);
+
+    const getDefaultValue = (prop) => {
+      if (prop === 'scale') return 1;
+      if (prop === 'flipX' || prop === 'flipY') return 1;
+      if (prop === 'opacity') return 1;
+      return 0;
+    };
+
+    // Ranges for properties
+    let minVal = 0, maxVal = 100;
+    let propName = 'Position X';
+    let propStep = 1;
+    if (activeProp === 'x') { minVal = 0; maxVal = state.canvasWidth; propName = 'Position X'; propStep = 10; }
+    else if (activeProp === 'y') { minVal = 0; maxVal = state.canvasHeight; propName = 'Position Y'; propStep = 10; }
+    else if (activeProp === 'scale') { minVal = 0.1; maxVal = 3.0; propName = 'Scale'; propStep = 0.05; }
+    else if (activeProp === 'rotation') { minVal = -180; maxVal = 180; propName = 'Rotation'; propStep = 5; }
+    else if (activeProp === 'opacity') { minVal = 0; maxVal = 1.0; propName = 'Opacity'; propStep = 0.05; }
+    else if (activeProp === 'skewX') { minVal = -60; maxVal = 60; propName = 'Skew X'; propStep = 1; }
+    else if (activeProp === 'skewY') { minVal = -60; maxVal = 60; propName = 'Skew Y'; propStep = 1; }
+    else if (activeProp === 'rotateX') { minVal = -90; maxVal = 90; propName = '3D Rotation X'; propStep = 1; }
+    else if (activeProp === 'rotateY') { minVal = -90; maxVal = 90; propName = '3D Rotation Y'; propStep = 1; }
+    else if (activeProp === 'flipX') { minVal = -1; maxVal = 1; propName = 'Flip Horizontal'; propStep = 2; }
+    else if (activeProp === 'flipY') { minVal = -1; maxVal = 1; propName = 'Flip Vertical'; propStep = 2; }
+
+    const svgWidth = 800;
+    const svgHeight = 220;
+    const paddingX = 40;
+    const paddingY = 30;
+
+    const timeToX = (t) => paddingX + (t / (state.totalDuration || 30)) * (svgWidth - 2 * paddingX);
+    const xToTime = (x) => ((x - paddingX) / (svgWidth - 2 * paddingX)) * (state.totalDuration || 30);
+    const valToY = (val) => svgHeight - paddingY - ((val - minVal) / (maxVal - minVal)) * (svgHeight - 2 * paddingY);
+    const yToVal = (y) => minVal + ((svgHeight - paddingY - y) / (svgHeight - 2 * paddingY)) * (maxVal - minVal);
+
+    // Generate Path points for lines
+    const generatePathD = () => {
+      if (sortedKfs.length === 0) return '';
+      let d = '';
+      
+      const firstKf = sortedKfs[0];
+      const firstVal = firstKf[activeProp] ?? getDefaultValue(activeProp);
+      d += `M ${timeToX(0)} ${valToY(firstVal)}`;
+
+      sortedKfs.forEach((kf) => {
+        const x = timeToX(kf.time);
+        const y = valToY(kf[activeProp] ?? getDefaultValue(activeProp));
+        d += ` L ${x} ${y}`;
+      });
+
+      const lastKf = sortedKfs[sortedKfs.length - 1];
+      const lastVal = lastKf[activeProp] ?? getDefaultValue(activeProp);
+      d += ` L ${timeToX(state.totalDuration || 30)} ${valToY(lastVal)}`;
+      
+      return d;
+    };
+
+    const generatePathDForProp = (prop) => {
+      if (sortedKfs.length === 0) return '';
+      let d = '';
+      
+      let pMin = minVal, pMax = maxVal;
+      if (prop === 'x') { pMin = 0; pMax = state.canvasWidth; }
+      else if (prop === 'y') { pMin = 0; pMax = state.canvasHeight; }
+      else if (prop === 'scale') { pMin = 0.1; pMax = 3.0; }
+      else if (prop === 'rotation') { pMin = -180; pMax = 180; }
+      else if (prop === 'opacity') { pMin = 0; pMax = 1.0; }
+
+      const propValToY = (val) => svgHeight - paddingY - ((val - pMin) / (pMax - pMin)) * (svgHeight - 2 * paddingY);
+
+      const firstKf = sortedKfs[0];
+      const firstVal = firstKf[prop] ?? getDefaultValue(prop);
+      d += `M ${timeToX(0)} ${propValToY(firstVal)}`;
+
+      sortedKfs.forEach((kf) => {
+        const x = timeToX(kf.time);
+        const y = propValToY(kf[prop] ?? getDefaultValue(prop));
+        d += ` L ${x} ${y}`;
+      });
+
+      const lastKf = sortedKfs[sortedKfs.length - 1];
+      const lastVal = lastKf[prop] ?? getDefaultValue(prop);
+      d += ` L ${timeToX(state.totalDuration || 30)} ${propValToY(lastVal)}`;
+      
+      return d;
+    };
+
+    const handleSvgDoubleClick = (e) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * svgWidth;
+      const y = ((e.clientY - rect.top) / rect.height) * svgHeight;
+
+      if (x < paddingX || x > svgWidth - paddingX || y < paddingY || y > svgHeight - paddingY) {
+        return;
+      }
+
+      const clickedTime = Math.max(0, Math.min(state.totalDuration, Number(xToTime(x).toFixed(2))));
+      const clickedVal = Math.max(minVal, Math.min(maxVal, Number(yToVal(y).toFixed(2))));
+
+      let baseTransform = state.characterTransforms[character.id] || {
+        x: state.canvasWidth / 2,
+        y: state.canvasHeight * 0.65,
+        scale: 1,
+        rotation: 0,
+        opacity: 1,
+      };
+
+      if (character.keyframes && character.keyframes.length > 0) {
+        baseTransform = getInterpolatedKeyframeTransform(character.keyframes, clickedTime);
+      }
+
+      const newTransform = {
+        ...baseTransform,
+        [activeProp]: clickedVal,
+      };
+
+      actions.addCharacterKeyframe(character.id, clickedTime, newTransform);
+      
+      const updatedKeyframes = [...(character.keyframes || [])];
+      const existingIdx = updatedKeyframes.findIndex(kf => Math.abs(kf.time - clickedTime) < 0.05);
+      if (existingIdx !== -1) {
+        actions.selectKeyframe(existingIdx);
+      } else {
+        updatedKeyframes.push({ time: clickedTime, ...newTransform });
+        updatedKeyframes.sort((a, b) => a.time - b.time);
+        const newIdx = updatedKeyframes.findIndex(kf => kf.time === clickedTime);
+        actions.selectKeyframe(newIdx !== -1 ? newIdx : updatedKeyframes.length - 1);
+      }
+      
+      actions.addToast(`Added keyframe at ${clickedTime.toFixed(1)}s`, 'success');
+    };
+
+    const handleAddKeyframeAtPlayhead = () => {
+      const currentTransform = state.characterTransforms[character.id] || {
+        x: state.canvasWidth / 2,
+        y: state.canvasHeight * 0.65,
+        scale: 1,
+        rotation: 0,
+        opacity: 1,
+      };
+      
+      actions.addCharacterKeyframe(character.id, state.currentTime, currentTransform);
+      actions.addToast(`Added keyframe at ${state.currentTime.toFixed(1)}s`, 'success');
+    };
+
+    const handleJumpPrevKeyframe = () => {
+      const prev = [...sortedKfs].reverse().find(kf => kf.time < state.currentTime - 0.05);
+      if (prev) {
+        actions.setCurrentTime(prev.time);
+      }
+    };
+
+    const handleJumpNextKeyframe = () => {
+      const next = sortedKfs.find(kf => kf.time > state.currentTime + 0.05);
+      if (next) {
+        actions.setCurrentTime(next.time);
+      }
+    };
+
+    const handleGraphPointerDown = (e, index, kf) => {
+      e.stopPropagation();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setDraggingKf({
+        index,
+        pointerId: e.pointerId,
+      });
+      actions.selectKeyframe(index);
+    };
+
+    const handleGraphPointerMove = (e) => {
+      if (!draggingKf) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * svgWidth;
+      const y = ((e.clientY - rect.top) / rect.height) * svgHeight;
+
+      let newTime = Math.max(0, Math.min(state.totalDuration, Number(xToTime(x).toFixed(2))));
+      let newVal = Math.max(minVal, Math.min(maxVal, Number(yToVal(y).toFixed(2))));
+
+      actions.updateCharacterKeyframe(character.id, draggingKf.index, {
+        time: newTime,
+        [activeProp]: newVal,
+      });
+    };
+
+    const handleGraphPointerUp = (e) => {
+      if (draggingKf) {
+        try {
+          e.currentTarget.releasePointerCapture(draggingKf.pointerId);
+        } catch (err) {}
+        setDraggingKf(null);
+        actions.addToast('Updated keyframe transform', 'success');
+      }
+    };
+
+    // Find current active block if any (for transitions)
+    const block = state.dialogueBlocks.find(b => b.id === state.selectedClipId) || 
+                  state.dialogueBlocks.find(b => b.characterId === character.id && state.currentTime >= b.startTime && state.currentTime <= b.startTime + b.duration) ||
+                  state.dialogueBlocks.find(b => b.characterId === character.id);
+
+    const anim = (block && block.animation) || {
       entrance: 'slide-up',
       exit: 'slide-down',
       entranceDuration: 0.3,
@@ -845,170 +1073,491 @@ export default function ScriptEditor() {
     };
 
     const handleAnimChange = (key, val) => {
-      actions.updateBlockAnimation(block.id, { [key]: val });
+      if (block) {
+        actions.updateBlockAnimation(block.id, { [key]: val });
+      }
     };
+
+    // Grid data
+    const gridLines = [0.25, 0.5, 0.75].map((ratio) => {
+      const val = minVal + ratio * (maxVal - minVal);
+      const y = valToY(val);
+      return { y, label: val.toFixed(activeProp === 'scale' || activeProp === 'opacity' ? 1 : 0) };
+    });
+
+    const duration = state.totalDuration || 30;
+    const timeStep = duration > 60 ? 10 : 5;
+    const verticalGrid = [];
+    for (let t = 0; t <= duration; t += timeStep) {
+      verticalGrid.push(t);
+    }
 
     return (
       <div className="inspector-panel">
-        <div className="inspector-header">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style={{ color: block.color }}>
-            <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4zm2 14H4V8h16v10z"/>
-          </svg>
-          <span className="inspector-title">Clip Animation Settings</span>
+        <div className="inspector-header" style={{ paddingBottom: 8 }}>
+          <span className="inspector-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style={{ color: character.color }}><polygon points="12 2 2 22 22 22"/></svg>
+            Character Animation Control
+          </span>
         </div>
 
-        <div className="inspector-section">
-          <div className="form-group">
-            <label className="form-label">Speaker</label>
-            <div style={{ color: block.color, fontWeight: 'bold' }}>{block.characterName}</div>
-          </div>
+        {/* Character Selector */}
+        <div className="form-group" style={{ marginBottom: 12 }}>
+          <label className="form-label">Active Character</label>
+          <select
+            className="form-select"
+            value={charId}
+            onChange={(e) => {
+              setSelectedCharacterId(e.target.value);
+              actions.selectKeyframe(null);
+            }}
+          >
+            {state.characters.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
 
-          <div className="form-group">
-            <label className="form-label">Dialogue Text</label>
-            <div style={{ fontStyle: 'italic', background: 'var(--surface-1)', padding: 8, borderRadius: 4, fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-              "{block.text}"
+        {/* Custom Keyframes Toggle */}
+        <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', background: 'var(--surface-1)', padding: '8px 12px', borderRadius: 6, marginBottom: 12, border: '1px solid var(--border-subtle)' }}>
+          <input
+            type="checkbox"
+            id="keyframingEnabled"
+            checked={character.keyframingEnabled || false}
+            onChange={(e) => {
+              actions.toggleCharacterKeyframing(character.id, e.target.checked);
+              actions.selectKeyframe(0);
+            }}
+            style={{ cursor: 'pointer' }}
+          />
+          <label htmlFor="keyframingEnabled" className="form-label" style={{ margin: 0, cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style={{ color: 'var(--accent-primary)' }}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/></svg>
+            Enable Keyframe Animation
+          </label>
+        </div>
+
+        {character.keyframingEnabled ? (
+          <>
+            {/* Property Selector Tabs */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4, background: 'var(--surface-2)', padding: 6, borderRadius: 6, marginBottom: 10, border: '1px solid var(--border-subtle)' }}>
+              {[
+                { id: 'x', label: 'X' },
+                { id: 'y', label: 'Y' },
+                { id: 'scale', label: 'Scale' },
+                { id: 'rotation', label: 'Rot' },
+                { id: 'opacity', label: 'Opac' },
+                { id: 'skewX', label: 'Skew X' },
+                { id: 'skewY', label: 'Skew Y' },
+                { id: 'rotateX', label: '3D X' },
+                { id: 'rotateY', label: '3D Y' },
+                { id: 'flipX', label: 'Flip H' },
+                { id: 'flipY', label: 'Flip V' }
+              ].map(prop => (
+                <button
+                  key={prop.id}
+                  style={{
+                    padding: '5px 2px',
+                    fontSize: '9px',
+                    textAlign: 'center',
+                    borderRadius: 4,
+                    border: '1px solid ' + (activeProp === prop.id ? 'var(--accent-primary)' : 'transparent'),
+                    background: activeProp === prop.id ? 'var(--surface-1)' : 'transparent',
+                    color: activeProp === prop.id ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                    fontWeight: activeProp === prop.id ? 'bold' : 'normal',
+                    cursor: 'pointer',
+                    minWidth: 0,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onClick={() => setActiveProp(prop.id)}
+                >
+                  {prop.label}
+                </button>
+              ))}
             </div>
-          </div>
-        </div>
 
-        <div className="inspector-section-title">Entrance Animation</div>
-        <div className="inspector-section">
-          <div className="form-group">
-            <label className="form-label">Preset Style</label>
-            <select
-              className="form-select"
-              value={anim.entrance}
-              onChange={(e) => handleAnimChange('entrance', e.target.value)}
-            >
-              <option value="slide-up">Slide Up</option>
-              <option value="slide-down">Slide Down</option>
-              <option value="slide-left">Slide Left</option>
-              <option value="slide-right">Slide Right</option>
-              <option value="pop">Bouncy Pop</option>
-              <option value="fade">Fade In</option>
-              <option value="zoom-spin">Zoom Spin</option>
-            </select>
-          </div>
-
-          <div className="form-row-slider">
-            <div className="slider-header">
-              <span>Entrance Duration</span>
-              <span>{anim.entranceDuration}s</span>
+            {/* Keyframe graph navigation toolbar */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
+                {propName} Graph
+              </span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  className="btn btn--secondary"
+                  style={{ padding: '2px 6px', fontSize: '10px', height: 20 }}
+                  onClick={handleJumpPrevKeyframe}
+                  title="Jump to previous keyframe"
+                >
+                  ◀
+                </button>
+                <button
+                  className="btn btn--secondary"
+                  style={{ padding: '2px 6px', fontSize: '10px', height: 20, display: 'flex', alignItems: 'center', gap: 2 }}
+                  onClick={handleAddKeyframeAtPlayhead}
+                  title="Add Keyframe at current playhead"
+                >
+                  ◆ +
+                </button>
+                <button
+                  className="btn btn--secondary"
+                  style={{ padding: '2px 6px', fontSize: '10px', height: 20 }}
+                  onClick={handleJumpNextKeyframe}
+                  title="Jump to next keyframe"
+                >
+                  ▶
+                </button>
+              </div>
             </div>
-            <input
-              type="range"
-              min="0"
-              max="1.5"
-              step="0.05"
-              value={anim.entranceDuration}
-              onChange={(e) => handleAnimChange('entranceDuration', parseFloat(e.target.value))}
-            />
-          </div>
-        </div>
 
-        <div className="inspector-section-title">Exit Animation</div>
-        <div className="inspector-section">
-          <div className="form-group">
-            <label className="form-label">Preset Style</label>
-            <select
-              className="form-select"
-              value={anim.exit}
-              onChange={(e) => handleAnimChange('exit', e.target.value)}
-            >
-              <option value="slide-up">Slide Up</option>
-              <option value="slide-down">Slide Down</option>
-              <option value="slide-left">Slide Left</option>
-              <option value="slide-right">Slide Right</option>
-              <option value="pop">Pop Out</option>
-              <option value="fade">Fade Out</option>
-              <option value="zoom-spin">Zoom Spin Out</option>
-            </select>
-          </div>
+            {/* Interactive SVG Keyframe Graph */}
+            <div style={{ background: '#0a0a0f', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden', position: 'relative', marginBottom: 6 }}>
+              <svg
+                width="100%"
+                viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+                style={{ display: 'block', touchAction: 'none' }}
+                onPointerMove={handleGraphPointerMove}
+                onPointerUp={handleGraphPointerUp}
+                onPointerLeave={handleGraphPointerUp}
+                onDoubleClick={handleSvgDoubleClick}
+              >
+                {/* Horizontal Grid lines */}
+                {gridLines.map((line, idx) => (
+                  <g key={idx}>
+                    <line
+                      x1={paddingX}
+                      y1={line.y}
+                      x2={svgWidth - paddingX}
+                      y2={line.y}
+                      stroke="rgba(255,255,255,0.06)"
+                      strokeDasharray="4,4"
+                    />
+                    <text
+                      x={paddingX - 8}
+                      y={line.y}
+                      fill="rgba(255,255,255,0.3)"
+                      fontSize="9"
+                      textAnchor="end"
+                      alignmentBaseline="middle"
+                    >
+                      {line.label}
+                    </text>
+                  </g>
+                ))}
 
-          <div className="form-row-slider">
-            <div className="slider-header">
-              <span>Exit Duration</span>
-              <span>{anim.exitDuration}s</span>
+                {/* Vertical Grid lines */}
+                {verticalGrid.map((t, idx) => {
+                  const x = timeToX(t);
+                  return (
+                    <g key={idx}>
+                      <line
+                        x1={x}
+                        y1={paddingY}
+                        x2={x}
+                        y2={svgHeight - paddingY}
+                        stroke="rgba(255,255,255,0.04)"
+                      />
+                      <text
+                        x={x}
+                        y={svgHeight - paddingY + 14}
+                        fill="rgba(255,255,255,0.3)"
+                        fontSize="9"
+                        textAnchor="middle"
+                      >
+                        {t}s
+                      </text>
+                    </g>
+                  );
+                })}
+
+                {/* Plot line */}
+                {generatePathD() && (
+                  <path
+                    d={generatePathD()}
+                    fill="none"
+                    stroke={activeProp === 'x' ? '#ff4081' : activeProp === 'y' ? '#00e5ff' : 'var(--accent-primary)'}
+                    strokeWidth="2.5"
+                  />
+                )}
+
+                {/* Plot line for reference prop in 2D position mode */}
+                {(activeProp === 'x' || activeProp === 'y') && (
+                  <path
+                    d={generatePathDForProp(activeProp === 'x' ? 'y' : 'x')}
+                    fill="none"
+                    stroke={activeProp === 'x' ? 'rgba(0, 229, 255, 0.25)' : 'rgba(255, 64, 129, 0.25)'}
+                    strokeWidth="1.5"
+                    strokeDasharray="3,3"
+                  />
+                )}
+
+                {/* Interactive Keyframe diamonds */}
+                {sortedKfs.map((kf, idx) => {
+                  const cx = timeToX(kf.time);
+                  const cy = valToY(kf[activeProp] ?? getDefaultValue(activeProp));
+                  const isSelected = state.selectedKeyframeIndex === idx;
+                  const size = isSelected ? 9 : 7;
+                  return (
+                    <rect
+                      key={idx}
+                      x={cx - size / 2}
+                      y={cy - size / 2}
+                      width={size}
+                      height={size}
+                      transform={`rotate(45, ${cx}, ${cy})`}
+                      fill={isSelected ? '#ff4081' : '#ffffff'}
+                      stroke={activeProp === 'x' ? '#ff4081' : activeProp === 'y' ? '#00e5ff' : 'var(--accent-primary)'}
+                      strokeWidth="1.5"
+                      style={{ cursor: 'grab' }}
+                      onPointerDown={(e) => handleGraphPointerDown(e, idx, kf)}
+                    />
+                  );
+                })}
+
+                {/* Vertical Playhead Indicator */}
+                <line
+                  x1={timeToX(state.currentTime)}
+                  y1={paddingY}
+                  x2={timeToX(state.currentTime)}
+                  y2={svgHeight - paddingY}
+                  stroke="#ffd21e"
+                  strokeWidth="1.5"
+                  opacity="0.8"
+                />
+              </svg>
             </div>
-            <input
-              type="range"
-              min="0"
-              max="1.5"
-              step="0.05"
-              value={anim.exitDuration}
-              onChange={(e) => handleAnimChange('exitDuration', parseFloat(e.target.value))}
-            />
-          </div>
-        </div>
 
-        <div className="inspector-section-title">Sustain / Idle Animation</div>
-        <div className="inspector-section">
-          <div className="form-group">
-            <label className="form-label">Preset Style</label>
-            <select
-              className="form-select"
-              value={anim.sustain || 'none'}
-              onChange={(e) => handleAnimChange('sustain', e.target.value)}
-            >
-              <option value="none">None</option>
-              <option value="shake">Shake</option>
-              <option value="move-around">Move Around</option>
-            </select>
-          </div>
+            <div style={{ fontSize: '10px', color: 'var(--text-disabled)', textAlign: 'center', marginBottom: 12 }}>
+              💡 Double-click empty space to put/add a keyframe. Drag points to edit.
+            </div>
 
-          {anim.sustain && anim.sustain !== 'none' && (
-            <>
+            {/* Selected Keyframe Inspector Details */}
+            {state.selectedKeyframeIndex !== null && sortedKfs[state.selectedKeyframeIndex] ? (
+              <div style={{ background: 'var(--surface-1)', padding: 8, borderRadius: 6, border: '1px solid var(--border-subtle)', marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--accent-primary)' }}>
+                    Keyframe #{state.selectedKeyframeIndex + 1}
+                  </span>
+                  <button
+                    style={{ background: 'transparent', border: 'none', color: '#ff4081', fontSize: '10px', cursor: 'pointer', padding: 0 }}
+                    onClick={() => {
+                      actions.removeCharacterKeyframe(character.id, state.selectedKeyframeIndex);
+                      actions.selectKeyframe(null);
+                      actions.addToast('Deleted keyframe', 'info');
+                    }}
+                  >
+                    Delete Keyframe
+                  </button>
+                </div>
+                <div className="form-row">
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label" style={{ fontSize: '9px' }}>Time (s)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0"
+                      max={state.totalDuration}
+                      className="form-input"
+                      style={{ height: 22, padding: '2px 4px', fontSize: '11px' }}
+                      value={sortedKfs[state.selectedKeyframeIndex].time}
+                      onChange={(e) => {
+                        const newTime = Math.max(0, Math.min(state.totalDuration, parseFloat(e.target.value) || 0));
+                        actions.updateCharacterKeyframe(character.id, state.selectedKeyframeIndex, { time: newTime });
+                      }}
+                    />
+                  </div>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label" style={{ fontSize: '9px' }}>{propName}</label>
+                    <input
+                      type="number"
+                      step={propStep / 10}
+                      min={minVal}
+                      max={maxVal}
+                      className="form-input"
+                      style={{ height: 22, padding: '2px 4px', fontSize: '11px' }}
+                      value={sortedKfs[state.selectedKeyframeIndex][activeProp] ?? getDefaultValue(activeProp)}
+                      onChange={(e) => {
+                        const val = Math.max(minVal, Math.min(maxVal, parseFloat(e.target.value) || 0));
+                        actions.updateCharacterKeyframe(character.id, state.selectedKeyframeIndex, { [activeProp]: val });
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="form-row-slider" style={{ marginTop: 4 }}>
+                  <input
+                    type="range"
+                    min={minVal}
+                    max={maxVal}
+                    step={propStep / 10}
+                    value={sortedKfs[state.selectedKeyframeIndex][activeProp] ?? getDefaultValue(activeProp)}
+                    onChange={(e) => {
+                      actions.updateCharacterKeyframe(character.id, state.selectedKeyframeIndex, { [activeProp]: parseFloat(e.target.value) });
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', fontSize: 'var(--text-xs)', color: 'var(--text-disabled)', marginBottom: 12 }}>
+                Click a dot on the graph to inspect / modify keyframe properties.
+              </div>
+            )}
+          </>
+        ) : null}
+
+        {/* dialogue block animation transitions override */}
+        {block ? (
+          <>
+            <div className="inspector-section-title" style={{ marginTop: 12 }}>Dialogue Block Transitions</div>
+            <div className="inspector-section">
+              <div className="form-group">
+                <label className="form-label">Dialogue Text Override</label>
+                <div style={{ fontStyle: 'italic', background: 'var(--surface-1)', padding: 8, borderRadius: 4, fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+                  "{block.text}"
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginTop: 8 }}>
+                <label className="form-label">Entrance Preset</label>
+                <select
+                  className="form-select"
+                  value={anim.entrance || 'slide-up'}
+                  onChange={(e) => handleAnimChange('entrance', e.target.value)}
+                >
+                  <option value="slide-up">Slide Up</option>
+                  <option value="slide-down">Slide Down</option>
+                  <option value="slide-left">Slide Left</option>
+                  <option value="slide-right">Slide Right</option>
+                  <option value="pop">Bouncy Pop</option>
+                  <option value="fade">Fade In</option>
+                  <option value="zoom-spin">Zoom Spin</option>
+                  <option value="bounce">Bounce In</option>
+                  <option value="flip">Flip In</option>
+                  <option value="slide-rotate">Slide Rotate In</option>
+                </select>
+              </div>
+
               <div className="form-row-slider">
                 <div className="slider-header">
-                  <span>Intensity</span>
-                  <span>{(anim.sustainIntensity ?? 0.5).toFixed(2)}</span>
+                  <span>Entrance Duration</span>
+                  <span>{anim.entranceDuration ?? 0.3}s</span>
                 </div>
                 <input
                   type="range"
                   min="0"
-                  max="2"
+                  max="1.5"
                   step="0.05"
-                  value={anim.sustainIntensity ?? 0.5}
-                  onChange={(e) => handleAnimChange('sustainIntensity', parseFloat(e.target.value))}
+                  value={anim.entranceDuration ?? 0.3}
+                  onChange={(e) => handleAnimChange('entranceDuration', parseFloat(e.target.value))}
                 />
+              </div>
+
+              <div className="form-group" style={{ marginTop: 8 }}>
+                <label className="form-label">Exit Preset</label>
+                <select
+                  className="form-select"
+                  value={anim.exit || 'slide-down'}
+                  onChange={(e) => handleAnimChange('exit', e.target.value)}
+                >
+                  <option value="slide-up">Slide Up</option>
+                  <option value="slide-down">Slide Down</option>
+                  <option value="slide-left">Slide Left</option>
+                  <option value="slide-right">Slide Right</option>
+                  <option value="pop">Pop Out</option>
+                  <option value="fade">Fade Out</option>
+                  <option value="zoom-spin">Zoom Spin Out</option>
+                  <option value="bounce">Bounce Out</option>
+                  <option value="flip">Flip Out</option>
+                  <option value="slide-rotate">Slide Rotate Out</option>
+                </select>
               </div>
 
               <div className="form-row-slider">
                 <div className="slider-header">
-                  <span>Speed</span>
-                  <span>{(anim.sustainSpeed ?? 0.5).toFixed(2)}</span>
+                  <span>Exit Duration</span>
+                  <span>{anim.exitDuration ?? 0.3}s</span>
                 </div>
                 <input
                   type="range"
-                  min="0.1"
-                  max="3"
+                  min="0"
+                  max="1.5"
                   step="0.05"
-                  value={anim.sustainSpeed ?? 0.5}
-                  onChange={(e) => handleAnimChange('sustainSpeed', parseFloat(e.target.value))}
+                  value={anim.exitDuration ?? 0.3}
+                  onChange={(e) => handleAnimChange('exitDuration', parseFloat(e.target.value))}
                 />
               </div>
-            </>
-          )}
-        </div>
 
-        {/* Batch Apply Animations */}
-        <div className="inspector-section-title">Apply Settings to Others</div>
-        <div className="inspector-section" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button
-            className="btn btn--secondary"
-            style={{ width: '100%', padding: '6px 8px', fontSize: 'var(--text-xs)', height: 28 }}
-            onClick={() => handleApplyAnimToAll(block.characterId)}
-          >
-            Apply to all of {block.characterName}
-          </button>
-          <button
-            className="btn btn--secondary"
-            style={{ width: '100%', padding: '6px 8px', fontSize: 'var(--text-xs)', height: 28 }}
-            onClick={() => handleApplyAnimToAll(null)}
-          >
-            Apply to all clips in project
-          </button>
-        </div>
+              <div className="form-group" style={{ marginTop: 8 }}>
+                <label className="form-label">Sustain / Idle Preset</label>
+                <select
+                  className="form-select"
+                  value={anim.sustain || 'none'}
+                  onChange={(e) => handleAnimChange('sustain', e.target.value)}
+                >
+                  <option value="none">None</option>
+                  <option value="shake">Shake</option>
+                  <option value="move-around">Move Around</option>
+                  <option value="bounce-idle">Bounce Talk Idle</option>
+                  <option value="breath">Pulsing Breath</option>
+                  <option value="float">Hover Float</option>
+                  <option value="dance">Dance Sway</option>
+                </select>
+              </div>
+
+              {anim.sustain && anim.sustain !== 'none' && (
+                <>
+                  <div className="form-row-slider">
+                    <div className="slider-header">
+                      <span>Intensity</span>
+                      <span>{(anim.sustainIntensity ?? 0.5).toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="2"
+                      step="0.05"
+                      value={anim.sustainIntensity ?? 0.5}
+                      onChange={(e) => handleAnimChange('sustainIntensity', parseFloat(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="form-row-slider">
+                    <div className="slider-header">
+                      <span>Speed</span>
+                      <span>{(anim.sustainSpeed ?? 0.5).toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="3"
+                      step="0.05"
+                      value={anim.sustainSpeed ?? 0.5}
+                      onChange={(e) => handleAnimChange('sustainSpeed', parseFloat(e.target.value))}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="inspector-section-title">Apply Transitions to Others</div>
+            <div className="inspector-section" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <button
+                className="btn btn--secondary"
+                style={{ width: '100%', padding: '4px 6px', fontSize: 'var(--text-xs)', height: 24 }}
+                onClick={() => handleApplyAnimToAll(block.characterId)}
+              >
+                Apply transitions to all of {block.characterName}
+              </button>
+              <button
+                className="btn btn--secondary"
+                style={{ width: '100%', padding: '4px 6px', fontSize: 'var(--text-xs)', height: 24 }}
+                onClick={() => handleApplyAnimToAll(null)}
+              >
+                Apply transitions to all project clips
+              </button>
+            </div>
+          </>
+        ) : null}
       </div>
     );
   };

@@ -322,6 +322,21 @@ export default function MediaLibrary() {
     actions.addToast(`Applied all ${voicesToApply.length} voice clips to the timeline!`, "success");
   };
 
+  const handleRemoveAllTimelineVoices = () => {
+    if (confirm("Are you sure you want to remove all voice clips from the timeline and restore default estimated durations?")) {
+      actions.removeAllVoicesFromTimeline();
+      actions.addToast("Removed all voice clips from timeline.", "success");
+    }
+  };
+
+  const handleDeleteAllVoiceClips = () => {
+    if (confirm("Are you sure you want to permanently delete all generated voice clips from the media library? This will also remove them from the timeline.")) {
+      actions.removeAllVoicesFromTimeline();
+      actions.deleteAllVoiceClipsFromLibrary();
+      actions.addToast("Deleted all generated voice clips from library.", "success");
+    }
+  };
+
 
   return (
     <div className="media-library panel">
@@ -329,14 +344,32 @@ export default function MediaLibrary() {
         <span className="panel__title">Media Library</span>
         <div className="panel__actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {(activeTab === 'audio' || activeTab === 'all') && state.mediaItems.some(m => m.isVoiceClone) && (
-            <button 
-              className="panel__action-btn panel__action-btn--apply-all" 
-              onClick={handleApplyAllVoices}
-              title="Apply all voice clips to dialogue tracks"
-            >
-              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8l-5-5z"/><polyline points="14 3 14 8 19 8"/></svg>
-              Apply All
-            </button>
+            <>
+              <button 
+                className="panel__action-btn panel__action-btn--apply-all" 
+                onClick={handleApplyAllVoices}
+                title="Apply all voice clips to dialogue tracks"
+              >
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8l-5-5z"/><polyline points="14 3 14 8 19 8"/></svg>
+                Apply All
+              </button>
+              <button 
+                className="panel__action-btn" 
+                onClick={handleRemoveAllTimelineVoices}
+                title="Remove all voice clips from timeline"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border-default)', fontSize: '11px', height: 22, width: 'auto', padding: '0 8px', color: 'var(--text-secondary)' }}
+              >
+                Remove All
+              </button>
+              <button 
+                className="panel__action-btn" 
+                onClick={handleDeleteAllVoiceClips}
+                title="Delete all voice clips from media library"
+                style={{ background: 'var(--surface-2)', border: '1px solid #ff4081', fontSize: '11px', height: 22, width: 'auto', padding: '0 8px', color: '#ff4081' }}
+              >
+                Delete All
+              </button>
+            </>
           )}
           <button className="panel__action-btn" onClick={handleImport} title="Import Files">
             +

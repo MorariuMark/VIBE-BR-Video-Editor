@@ -3,7 +3,99 @@
    ═══════════════════════════════════════════════════════════ */
 
 :root {
-  /* ── Color System ── */
+  /* ── Color System (Adobe Premiere Pro 2026 Theme by default) ── */
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #141414;
+  --bg-tertiary: #1a1a2a;
+  --bg-elevated: #282828;
+  --bg-hover: #323232;
+  --bg-active: #1473e6;
+  
+  --surface-1: #222222;
+  --surface-2: #2a2a2a;
+  --surface-3: #323232;
+  
+  --border-subtle: #2b2b2b;
+  --border-default: #323232;
+  --border-strong: #3e3e3e;
+  --border-accent: #1473e6;
+  
+  --text-primary: #e6e6e6;
+  --text-secondary: #b3b3b3;
+  --text-tertiary: #8f8f8f;
+  --text-disabled: #5c5c5c;
+  
+  --accent-primary: #1473e6;
+  --accent-primary-hover: #2c80ff;
+  --accent-primary-glow: rgba(20, 115, 230, 0.15);
+  --accent-secondary: #1473e6;
+  --accent-secondary-glow: rgba(20, 115, 230, 0.15);
+  --accent-tertiary: #9d4edd;
+  --accent-success: #00e676;
+  --accent-warning: #ffab40;
+  --accent-error: #ff5252;
+  
+  /* Timeline track colors - Professional Premiere look */
+  --track-color-1: #2d5a88;
+  --track-color-2: #2d7a6e;
+  --track-color-3: #7b4f73;
+  --track-color-4: #8a6a42;
+  --track-color-5: #3b704c;
+  --track-color-6: #965345;
+  --track-color-7: #4e5a88;
+  --track-color-8: #6f805a;
+  
+  /* ── Typography ── */
+  --font-sans: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  
+  --text-xs: 0.675rem;
+  --text-sm: 0.75rem;
+  --text-base: 0.8125rem;
+  --text-md: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.125rem;
+  --text-2xl: 1.375rem;
+  --text-3xl: 1.75rem;
+  
+  /* ── Spacing ── */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  
+  /* ── Borders & Radius (Sharp, professional Premiere look) ── */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  --radius-full: 9999px;
+  
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.5);
+  --shadow-glow: 0 0 20px var(--accent-primary-glow);
+  
+  /* ── Transitions ── */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 400ms;
+  
+  /* ── Layout ── */
+  --titlebar-height: 38px;
+  --toolbar-height: 42px;
+  --panel-min-width: 240px;
+  --timeline-min-height: 180px;
+}
+
+body.theme-blue {
+  /* Blue/Purple theme overrides (original default theme) */
   --bg-primary: #0a0a0f;
   --bg-secondary: #12121a;
   --bg-tertiary: #1a1a2e;
@@ -31,11 +123,8 @@
   --accent-secondary: #00e5ff;
   --accent-secondary-glow: rgba(0, 229, 255, 0.2);
   --accent-tertiary: #ff4081;
-  --accent-success: #00e676;
-  --accent-warning: #ffab40;
-  --accent-error: #ff5252;
   
-  /* Character track colors */
+  /* Timeline track colors */
   --track-color-1: #7c4dff;
   --track-color-2: #00e5ff;
   --track-color-3: #ff4081;
@@ -44,208 +133,136 @@
   --track-color-6: #ff6e40;
   --track-color-7: #448aff;
   --track-color-8: #69f0ae;
-  
-  /* ── Typography ── */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-  
-  --text-xs: 0.675rem;
-  --text-sm: 0.75rem;
-  --text-base: 0.8125rem;
-  --text-md: 0.875rem;
-  --text-lg: 1rem;
-  --text-xl: 1.125rem;
-  --text-2xl: 1.375rem;
-  --text-3xl: 1.75rem;
-  
-  /* ── Spacing ── */
-  --sp-1: 4px;
-  --sp-2: 8px;
-  --sp-3: 12px;
-  --sp-4: 16px;
-  --sp-5: 20px;
-  --sp-6: 24px;
-  --sp-8: 32px;
-  
-  /* ── Borders & Radius ── */
+
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
-  --radius-full: 9999px;
-  
-  /* ── Shadows ── */
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
-  --shadow-lg: 0 8px 24px rgba(0,0,0,0.5);
-  --shadow-glow: 0 0 20px var(--accent-primary-glow);
-  
-  /* ── Transitions ── */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --duration-fast: 150ms;
-  --duration-normal: 250ms;
-  --duration-slow: 400ms;
-  
-  /* ── Layout ── */
-  --titlebar-height: 38px;
-  --toolbar-height: 42px;
-  --panel-min-width: 240px;
-  --timeline-min-height: 180px;
 }
 
-body.theme-dark-gay {
-  /* Dark-Gay colorful theme overrides */
-  --bg-primary: #09030d; /* Deep dark purple-violet */
-  --bg-secondary: #12061b;
-  --bg-tertiary: #190a26;
-  --bg-elevated: #210d32;
-  --bg-hover: #2f1349;
-  --bg-active: #3e195f;
+body.theme-red {
+  /* Red theme overrides */
+  --bg-primary: #0f0505;
+  --bg-secondary: #1a0f0f;
+  --bg-tertiary: #2a1616;
+  --bg-elevated: #321b1b;
+  --bg-hover: #422424;
+  --bg-active: #ff3333;
   
-  --surface-1: #150923;
-  --surface-2: #1e0c32;
-  --surface-3: #281042;
+  --surface-1: #251212;
+  --surface-2: #301818;
+  --surface-3: #3c1e1e;
   
-  --border-accent: rgba(255, 0, 127, 0.4);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --border-accent: rgba(255, 51, 51, 0.4);
   
-  --accent-primary: #ff007f; /* Hot neon pink */
-  --accent-primary-hover: #ff3399;
-  --accent-primary-glow: rgba(255, 0, 127, 0.25);
+  --text-primary: #f5eded;
+  --text-secondary: #d4c2c2;
+  --text-tertiary: #9c7f7f;
+  --text-disabled: #695252;
   
-  --accent-secondary: #00f5ff; /* Neon cyan */
-  --accent-secondary-glow: rgba(0, 245, 255, 0.2);
+  --accent-primary: #ff3333;
+  --accent-primary-hover: #ff5555;
+  --accent-primary-glow: rgba(255, 51, 51, 0.25);
+  --accent-secondary: #ff7777;
+  --accent-secondary-glow: rgba(255, 119, 119, 0.2);
+  --accent-tertiary: #ffab40;
   
-  --accent-tertiary: #e040fb; /* Neon magenta */
-  
-  /* Vibrant rainbow track colors */
-  --track-color-1: #ff007f; /* Pink */
-  --track-color-2: #ff7700; /* Orange */
-  --track-color-3: #ffdd00; /* Yellow */
-  --track-color-4: #00ff66; /* Green */
-  --track-color-5: #00f5ff; /* Cyan */
-  --track-color-6: #9d4edd; /* Purple */
-  --track-color-7: #ff00ff; /* Magenta */
-  --track-color-8: #ff3333; /* Red */
+  /* Timeline track colors - Red tones */
+  --track-color-1: #ff3333;
+  --track-color-2: #e65c00;
+  --track-color-3: #ff6b6b;
+  --track-color-4: #cc3333;
+  --track-color-5: #ff8787;
+  --track-color-6: #f03e3e;
+  --track-color-7: #ff922b;
+  --track-color-8: #c92a2a;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
 }
 
-body.theme-premiere {
-  /* Adobe Premiere Pro 2026 Theme */
-  --bg-primary: #1e1e1e;
-  --bg-secondary: #141414;
-  --bg-tertiary: #1a1a1a;
-  --bg-elevated: #282828;
-  --bg-hover: #323232;
-  --bg-active: #1473e6;
-  
-  --surface-1: #222222;
-  --surface-2: #2a2a2a;
-  --surface-3: #323232;
-  
-  --border-subtle: #2b2b2b;
-  --border-default: #323232;
-  --border-strong: #3e3e3e;
-  --border-accent: #1473e6;
-  
-  --text-primary: #e6e6e6;
-  --text-secondary: #b3b3b3;
-  --text-tertiary: #8f8f8f;
-  --text-disabled: #5c5c5c;
-  
-  --accent-primary: #1473e6;
-  --accent-primary-hover: #2c80ff;
-  --accent-primary-glow: rgba(20, 115, 230, 0.15);
-  
-  --accent-secondary: #1473e6;
-  --accent-secondary-glow: rgba(20, 115, 230, 0.15);
-  --accent-tertiary: #9d4edd;
-  
-  /* Timeline track colors - Professional Premiere look */
-  --track-color-1: #2d5a88;
-  --track-color-2: #2d7a6e;
-  --track-color-3: #7b4f73;
-  --track-color-4: #8a6a42;
-  --track-color-5: #3b704c;
-  --track-color-6: #965345;
-  --track-color-7: #4e5a88;
-  --track-color-8: #6f805a;
-  
-  /* Radius overrides for sharp, professional Premiere look */
-  --radius-sm: 2px;
-  --radius-md: 3px;
-  --radius-lg: 4px;
-  --radius-xl: 6px;
-  
-  --font-sans: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
-}
-
-/* Theme specific overrides for buttons/branding */
-body.theme-dark-gay .titlebar__logo {
-  background: linear-gradient(135deg, #ff007f, #00f5ff) !important;
-}
-
-body.theme-dark-gay .toolbar__btn--accent {
-  background: linear-gradient(135deg, #ff007f, #9d4edd) !important;
-}
-
-body.theme-dark-gay .media-tab--active {
-  color: #ff007f !important;
-  background: rgba(255, 0, 127, 0.15) !important;
-}
-
-/* Premiere specific overrides */
-body.theme-premiere .titlebar__logo {
-  background: #1473e6 !important;
+/* Base style mapping to default (Premiere Pro) theme */
+.titlebar__logo {
+  background: var(--accent-primary) !important;
   color: #ffffff !important;
 }
 
-body.theme-premiere .toolbar__btn--accent {
-  background: #1473e6 !important;
+.toolbar__btn--accent {
+  background: var(--accent-primary) !important;
   color: #ffffff !important;
   border-radius: 2px;
 }
 
-body.theme-premiere .toolbar__btn--accent:hover {
-  background: #2c80ff !important;
+.toolbar__btn--accent:hover {
+  background: var(--accent-primary-hover) !important;
 }
 
-body.theme-premiere .media-tab--active {
-  color: #1473e6 !important;
-  border-bottom: 2px solid #1473e6 !important;
-  background: rgba(20, 115, 230, 0.08) !important;
+.media-tab--active {
+  color: var(--accent-primary) !important;
+  border-bottom: 2px solid var(--accent-primary) !important;
+  background: var(--accent-primary-glow) !important;
 }
 
-body.theme-premiere .editor-tab--active {
+.editor-tab--active {
   color: #ffffff !important;
-  border-bottom-color: #1473e6 !important;
-  background: rgba(20, 115, 230, 0.05) !important;
+  border-bottom-color: var(--accent-primary) !important;
+  background: var(--accent-primary-glow) !important;
 }
 
-body.theme-premiere .panel__action-btn--apply-all {
-  background: #1473e6 !important;
-  color: #ffffff !important;
+/* Theme specific overrides for buttons/branding */
+body.theme-blue .titlebar__logo {
+  background: linear-gradient(135deg, #7c4dff, #00e5ff) !important;
+}
+
+body.theme-blue .toolbar__btn--accent {
+  background: #7c4dff !important;
+  border-radius: var(--radius-sm);
+}
+
+body.theme-blue .toolbar__btn--accent:hover {
+  background: #9165ff !important;
+}
+
+body.theme-red .titlebar__logo {
+  background: linear-gradient(135deg, #ff3333, #ff7700) !important;
+}
+
+body.theme-red .toolbar__btn--accent {
+  background: #ff3333 !important;
+  border-radius: var(--radius-sm);
+}
+
+body.theme-red .toolbar__btn--accent:hover {
+  background: #ff5555 !important;
 }
 
 /* Apply All Button base class styling */
-.panel__action-btn--apply-all {
+.panel__action-btn.panel__action-btn--apply-all {
   font-size: 11px;
-  padding: 4px 8px;
+  padding: 0 10px;
   border-radius: var(--radius-sm);
-  background: var(--accent-secondary);
-  color: var(--bg-primary);
-  font-weight: bold;
+  background: var(--accent-primary-glow);
+  color: var(--accent-primary);
+  border: 1px solid var(--accent-primary);
+  font-weight: 600;
   cursor: pointer;
-  border: none;
-  height: auto;
-  line-height: 1.4;
-  transition: background 0.2s, color 0.2s, opacity 0.2s;
+  height: 26px;
+  width: auto;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  transition: all 0.2s ease;
 }
 
-.panel__action-btn--apply-all:hover {
-  opacity: 0.9;
+.panel__action-btn.panel__action-btn--apply-all:hover {
+  background: var(--accent-primary);
+  color: #ffffff;
+  opacity: 1;
 }
 
 /* ── Reset & Base ── */
@@ -980,10 +997,11 @@ html, body, #root {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-tertiary);
+  flex-wrap: wrap;
 }
 
 .dialogue-block__timing input {
-  width: 60px;
+  width: 46px;
   padding: 2px var(--sp-1);
   background: var(--surface-2);
   border: 1px solid var(--border-subtle);
@@ -992,6 +1010,7 @@ html, body, #root {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   text-align: center;
+  box-sizing: border-box;
 }
 
 .dialogue-block__timing input:focus {

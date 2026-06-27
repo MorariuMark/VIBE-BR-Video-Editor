@@ -38,6 +38,247 @@ def status():
         "vram_total": torch.cuda.get_device_properties(0).total_memory / (1024**3) if cuda_avail else 0
     })
 
+import threading
+import shutil
+import traceback
+import requests
+from huggingface_hub import HfApi
+
+# Global download state
+download_lock = threading.Lock()
+download_state = {
+    "downloading": False,
+    "model_name": None,
+    "total_bytes": 0,
+    "downloaded_bytes": 0,
+    "error": None
+}
+
+def check_model_installed(model_name):
+    if model_name == "luxtts":
+        local_path = os.path.join(project_dir, "models", "luxtts")
+        critical_files = [
+            "model.pt",
+            "text_encoder.onnx",
+            "fm_decoder.onnx",
+            "config.json",
+            "tokens.txt",
+            os.path.join("vocoder", "config.yaml"),
+            os.path.join("vocoder", "vocos.bin")
+        ]
+        if not os.path.exists(local_path):
+            return False
+        for f in critical_files:
+            file_path = os.path.join(local_path, f)
+            if not os.path.exists(file_path) or os.path.getsize(file_path) < 100:
+                return False
+        return True
+    elif model_name == "qwen3tts_0.6b":
+        local_path = os.path.join(project_dir, "models", "qwen3tts")
+        critical_files = [
+            "model.safetensors",
+            "config.json",
+            "vocab.json",
+            "merges.txt",
+            os.path.join("speech_tokenizer", "model.safetensors"),
+            os.path.join("speech_tokenizer", "config.json")
+        ]
+        if not os.path.exists(local_path):
+            return False
+        for f in critical_files:
+            file_path = os.path.join(local_path, f)
+            if not os.path.exists(file_path) or os.path.getsize(file_path) < 100:
+                return False
+        return True
+    elif model_name == "qwen3tts_1.7b":
+        local_path = os.path.join(project_dir, "models", "qwen3tts_1.7b")
+        critical_files = [
+            "model.safetensors",
+            "config.json",
+            "vocab.json",
+            "merges.txt",
+            os.path.join("speech_tokenizer", "model.safetensors"),
+            os.path.join("speech_tokenizer", "config.json")
+        ]
+        if not os.path.exists(local_path):
+            return False
+        for f in critical_files:
+            file_path = os.path.join(local_path, f)
+            if not os.path.exists(file_path) or os.path.getsize(file_path) < 100:
+                return False
+        return True
+    return False
+
+def download_model_thread(model_name):
+    global download_state
+    try:
+        api = HfApi()
+        if model_name == "luxtts":
+            repo_id = "YatharthS/LuxTTS"
+            dest_dir = os.path.join(project_dir, "models", "luxtts")
+            files_to_download = [
+                "config.json",
+                "tokens.txt",
+                "model.pt",
+                "text_encoder.onnx",
+                "fm_decoder.onnx",
+                "vocoder/config.yaml",
+                "vocoder/vocos.bin"
+            ]
+        elif model_name == "qwen3tts_0.6b":
+            repo_id = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+            dest_dir = os.path.join(project_dir, "models", "qwen3tts")
+            files_to_download = [
+                "config.json",
+                "generation_config.json",
+                "merges.txt",
+                "model.safetensors",
+                "preprocessor_config.json",
+                "speech_tokenizer/config.json",
+                "speech_tokenizer/configuration.json",
+                "speech_tokenizer/model.safetensors",
+                "speech_tokenizer/preprocessor_config.json",
+                "tokenizer_config.json",
+                "vocab.json"
+            ]
+        elif model_name == "qwen3tts_1.7b":
+            repo_id = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+            dest_dir = os.path.join(project_dir, "models", "qwen3tts_1.7b")
+            files_to_download = [
+                "config.json",
+                "generation_config.json",
+                "merges.txt",
+                "model.safetensors",
+                "preprocessor_config.json",
+                "speech_tokenizer/config.json",
+                "speech_tokenizer/configuration.json",
+                "speech_tokenizer/model.safetensors",
+                "speech_tokenizer/preprocessor_config.json",
+                "tokenizer_config.json",
+                "vocab.json"
+            ]
+        else:
+            raise ValueError(f"Unknown model: {model_name}")
+
+        os.makedirs(dest_dir, exist_ok=True)
+        
+        print(f"[Download Thread] Listing files in HF repo {repo_id}...", flush=True)
+        info = api.model_info(repo_id=repo_id, files_metadata=True)
+        sizes = {sibling.rfilename: sibling.size for sibling in info.siblings if sibling.size is not None}
+        
+        total_bytes = 0
+        for f in files_to_download:
+            total_bytes += sizes.get(f, 0)
+            
+        with download_lock:
+            download_state["downloading"] = True
+            download_state["model_name"] = model_name
+            download_state["total_bytes"] = total_bytes
+            download_state["downloaded_bytes"] = 0
+            download_state["error"] = None
+
+        print(f"[Download Thread] Total size of {model_name} to download: {total_bytes} bytes", flush=True)
+        
+        for filename in files_to_download:
+            url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+            target_path = os.path.join(dest_dir, filename)
+            
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            
+            print(f"[Download Thread] Downloading {filename}...", flush=True)
+            response = requests.get(url, stream=True, allow_redirects=True, timeout=30)
+            if response.status_code != 200:
+                raise Exception(f"Failed to download {filename}: HTTP status {response.status_code}")
+                
+            with open(target_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=1024*1024):
+                    if chunk:
+                        f.write(chunk)
+                        with download_lock:
+                            download_state["downloaded_bytes"] += len(chunk)
+                            
+        print(f"[Download Thread] Download of {model_name} completed successfully!", flush=True)
+        with download_lock:
+            download_state["downloading"] = False
+            download_state["downloaded_bytes"] = total_bytes
+            
+    except Exception as e:
+        traceback.print_exc()
+        print(f"[Download Thread] Error downloading {model_name}: {str(e)}", flush=True)
+        with download_lock:
+            download_state["downloading"] = False
+            download_state["error"] = str(e)
+
+@app.route("/model_status", methods=["GET"])
+def get_model_status():
+    return jsonify({
+        "luxtts": check_model_installed("luxtts"),
+        "qwen3tts_0.6b": check_model_installed("qwen3tts_0.6b"),
+        "qwen3tts_1.7b": check_model_installed("qwen3tts_1.7b")
+    })
+
+@app.route("/download_model", methods=["POST"])
+def download_model():
+    global download_state
+    data = request.json or {}
+    model_name = data.get("model_name")
+    
+    with download_lock:
+        if download_state["downloading"]:
+            return jsonify({"success": False, "error": "A download is already in progress"}), 400
+            
+    t = threading.Thread(target=download_model_thread, args=(model_name,))
+    t.daemon = True
+    t.start()
+    return jsonify({"success": True, "message": f"Started download of {model_name}"})
+
+@app.route("/download_progress", methods=["GET"])
+def download_progress():
+    global download_state
+    with download_lock:
+        return jsonify(download_state)
+
+@app.route("/uninstall_model", methods=["POST"])
+def uninstall_model():
+    global model, model_type
+    data = request.json or {}
+    model_name = data.get("model_name")
+    
+    try:
+        import torch
+        if model is not None and (
+            (model_name == "luxtts" and model_type == "luxtts") or
+            (model_name == "qwen3tts_0.6b" and model_type == "qwen3tts_0.6b") or
+            (model_name == "qwen3tts_1.7b" and model_type == "qwen3tts_1.7b")
+        ):
+            print(f"[Python Server] Unloading {model_type} model before uninstall...", flush=True)
+            del model
+            model = None
+            model_type = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+        if model_name == "luxtts":
+            dest_dir = os.path.join(project_dir, "models", "luxtts")
+        elif model_name == "qwen3tts_0.6b":
+            dest_dir = os.path.join(project_dir, "models", "qwen3tts")
+        elif model_name == "qwen3tts_1.7b":
+            dest_dir = os.path.join(project_dir, "models", "qwen3tts_1.7b")
+        else:
+            return jsonify({"success": False, "error": f"Unknown model name: {model_name}"}), 400
+            
+        if os.path.exists(dest_dir):
+            shutil.rmtree(dest_dir)
+            print(f"[Python Server] Uninstalled {model_name} (deleted {dest_dir})", flush=True)
+            return jsonify({"success": True, "message": f"Successfully uninstalled {model_name}"})
+        else:
+            return jsonify({"success": True, "message": f"Model {model_name} was not installed"})
+            
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route("/load", methods=["POST"])
 def load_model():
     global model, model_type
@@ -46,11 +287,9 @@ def load_model():
         data = request.json or {}
         requested_type = data.get("model_name", "luxtts")
         
-        # If model is already loaded and matches the requested type, return success
         if model is not None and model_type == requested_type:
             return jsonify({"success": True, "message": f"Model {requested_type} already loaded"})
             
-        # Otherwise, if any model is loaded, unload it first
         if model is not None:
             print(f"[Python Server] Unloading existing {model_type} model to switch...", flush=True)
             del model
@@ -62,23 +301,40 @@ def load_model():
                 
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         
-        if requested_type == "qwen3tts_0.6b":
-            print(f"[Python Server] Loading Qwen3-TTS 0.6B model on {device}...", flush=True)
+        if requested_type in ["qwen3tts_0.6b", "qwen3tts_1.7b"]:
+            print(f"[Python Server] Loading Qwen3-TTS {requested_type} model on {device}...", flush=True)
             from qwen_tts import Qwen3TTSModel
             dtype = torch.float32
+            
+            local_path = os.path.join(project_dir, "models", "qwen3tts" if requested_type == "qwen3tts_0.6b" else "qwen3tts_1.7b")
+            if os.path.exists(os.path.join(local_path, "model.safetensors")):
+                model_id_or_path = local_path
+                print(f"[Python Server] Loading Qwen3-TTS from local folder: {local_path}", flush=True)
+            else:
+                model_id_or_path = "Qwen/Qwen3-TTS-12Hz-0.6B-Base" if requested_type == "qwen3tts_0.6b" else "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+                print(f"[Python Server] Loading Qwen3-TTS from Hugging Face Hub: {model_id_or_path}", flush=True)
+                
             model = Qwen3TTSModel.from_pretrained(
-                "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+                model_id_or_path,
                 device_map=device,
                 dtype=dtype,
                 attn_implementation="eager"
             )
-            model_type = "qwen3tts_0.6b"
-            print("[Python Server] Qwen3-TTS 0.6B model loaded successfully.", flush=True)
+            model_type = requested_type
+            print(f"[Python Server] Qwen3-TTS {requested_type} model loaded successfully.", flush=True)
         else: # default: luxtts
             lux_device = "cuda" if torch.cuda.is_available() else "cpu"
             print(f"[Python Server] Loading LuxTTS model on {lux_device}...", flush=True)
             from zipvoice.luxvoice import LuxTTS
-            model = LuxTTS(device=lux_device)
+            
+            local_path = os.path.join(project_dir, "models", "luxtts")
+            if os.path.exists(os.path.join(local_path, "model.pt")):
+                print(f"[Python Server] Loading LuxTTS from local folder: {local_path}", flush=True)
+                model = LuxTTS(model_path=local_path, device=lux_device)
+            else:
+                print("[Python Server] Loading LuxTTS from Hugging Face Hub snapshot...", flush=True)
+                model = LuxTTS(device=lux_device)
+                
             model_type = "luxtts"
             print("[Python Server] LuxTTS model loaded successfully.", flush=True)
             
@@ -132,6 +388,8 @@ def clone_voice():
         language = data.get("language", "English")
         ref_audio = data.get("ref_audio", "")
         ref_text = data.get("ref_text", "")
+        temperature = data.get("temperature")
+        speed = data.get("speed")
         
         if not text:
             return jsonify({"success": False, "error": "Target text is required."}), 400
@@ -140,12 +398,33 @@ def clone_voice():
 
         print(f"[Python Server] Generating voice clone ({model_type}) for text: '{text[:30]}...'", flush=True)
         
-        if model_type == "qwen3tts_0.6b":
+        if model_type in ["qwen3tts_0.6b", "qwen3tts_1.7b"]:
+            gen_kwargs = {}
+            if temperature is not None:
+                temp_val = float(temperature)
+                if temp_val <= 0.05:
+                    gen_kwargs["do_sample"] = False
+                    gen_kwargs["subtalker_dosample"] = False
+                else:
+                    gen_kwargs["do_sample"] = True
+                    gen_kwargs["temperature"] = temp_val
+                    gen_kwargs["subtalker_dosample"] = True
+                    gen_kwargs["subtalker_temperature"] = temp_val
+            
+            # Auto-enable x_vector_only_mode if ref_text is empty/missing
+            x_vector_only = not bool(ref_text and ref_text.strip())
+            if x_vector_only:
+                gen_kwargs["x_vector_only_mode"] = True
+                ref_text_arg = None
+            else:
+                ref_text_arg = ref_text
+
             wavs, sr = model.generate_voice_clone(
                 text=text,
                 language=language,
                 ref_audio=ref_audio,
-                ref_text=ref_text
+                ref_text=ref_text_arg,
+                **gen_kwargs
             )
             audio_data = wavs[0]
             if hasattr(audio_data, "cpu"):
@@ -156,7 +435,13 @@ def clone_voice():
             # Encode reference prompt
             encoded_prompt = model.encode_prompt(ref_audio, prompt_text=ref_text)
             # Generate speech
-            wav = model.generate_speech(text, encoded_prompt)
+            gen_kwargs = {}
+            if temperature is not None:
+                gen_kwargs["t_shift"] = float(temperature)
+            if speed is not None:
+                gen_kwargs["speed"] = float(speed)
+                
+            wav = model.generate_speech(text, encoded_prompt, **gen_kwargs)
             # Audio sample array conversion
             audio_data = wav[0].numpy() if wav.ndim > 1 else wav.numpy()
             sr = 48000

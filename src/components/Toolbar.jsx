@@ -13,17 +13,17 @@ export default function Toolbar() {
   });
 
   React.useEffect(() => {
-    document.body.classList.remove('theme-dark-gay', 'theme-premiere');
-    if (theme === 'dark-gay') {
-      document.body.classList.add('theme-dark-gay');
-    } else if (theme === 'premiere') {
-      document.body.classList.add('theme-premiere');
+    document.body.classList.remove('theme-blue', 'theme-red');
+    if (theme === 'blue') {
+      document.body.classList.add('theme-blue');
+    } else if (theme === 'red') {
+      document.body.classList.add('theme-red');
     }
     localStorage.setItem('theme', theme);
   }, [theme]);
 
   const handleThemeToggle = () => {
-    const themes = ['default', 'dark-gay', 'premiere'];
+    const themes = ['default', 'blue', 'red'];
     setTheme(prev => {
       const currentIndex = themes.indexOf(prev);
       const nextIndex = (currentIndex + 1) % themes.length;
@@ -154,6 +154,17 @@ export default function Toolbar() {
   return (
     <div className="toolbar">
       <div className="toolbar__group">
+        <button
+          className="toolbar__btn"
+          onClick={() => actions.setShowProjectSettingsModal(true)}
+          title="Project Settings"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </button>
+      </div>
+
+      <div className="toolbar__group">
         {tools.map(tool => (
           <button
             key={tool.id}
@@ -184,12 +195,12 @@ export default function Toolbar() {
         <button
           className="toolbar__btn"
           onClick={handleThemeToggle}
-          title="Switch Theme (Default / Dark-Gay / Premiere Pro 2026)"
+          title="Switch Theme (Default / Blue / Red)"
         >
           <span>
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 4 }}><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19C4.85857 19 4.47715 16 7 16C9.52285 16 10 18.5 10 20C10 21 11.5 22 12 22Z"/><circle cx="7.5" cy="10.5" r="1.5" fill="currentColor"/><circle cx="11.5" cy="7.5" r="1.5" fill="currentColor"/><circle cx="16.5" cy="9.5" r="1.5" fill="currentColor"/><circle cx="15.5" cy="14.5" r="1.5" fill="currentColor"/></svg>
           </span>
-          <span style={{ textTransform: 'capitalize' }}>Theme: {theme === 'premiere' ? 'Premiere' : theme === 'dark-gay' ? 'Dark-Gay' : 'Default'}</span>
+          <span style={{ textTransform: 'capitalize' }}>Theme: {theme}</span>
         </button>
       </div>
 

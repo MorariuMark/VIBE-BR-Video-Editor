@@ -142,7 +142,8 @@ def load_models_cpu(model_path = None, num_thread=2):
     params = LuxTTSConfig()
     params.seed = 42
 
-    model_path = snapshot_download('YatharthS/LuxTTS')
+    if model_path is None:
+        model_path = snapshot_download('YatharthS/LuxTTS')
 
     token_file = f"{model_path}/tokens.txt"
     text_encoder_path = f"{model_path}/text_encoder.onnx"

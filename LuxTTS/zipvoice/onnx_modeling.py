@@ -14,7 +14,6 @@ from huggingface_hub import hf_hub_download
 from lhotse.utils import fix_random_seed
 from torch import Tensor, nn
 
-from zipvoice.bin.infer_zipvoice import get_vocoder
 from zipvoice.models.modules.solver import get_time_steps
 from zipvoice.tokenizer.tokenizer import (
     EmiliaTokenizer,

@@ -14,7 +14,7 @@ const TRACK_COLORS = [
 
 export const DEFAULT_TEXT_STYLE = {
   fontFamily: 'Impact',
-  fontSize: 36,
+  fontSize: 48,
   color: '#ffffff',
   strokeColor: '#000000',
   strokeWidth: 4,
@@ -26,7 +26,7 @@ export const DEFAULT_TEXT_STYLE = {
   glowBlur: 0,
   backgroundColor: 'rgba(0,0,0,0.7)',
   backgroundPadding: 10,
-  showBackground: true,
+  showBackground: false,
   letterSpacing: 2,
   lineHeight: 1.4,
   wordsPerLine: 3,

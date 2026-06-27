@@ -10,6 +10,32 @@ export default function VoiceCloneWindow() {
   const [unloadingModel, setUnloadingModel] = useState(false);
   const [selectedModel, setSelectedModel] = useState('luxtts');
   const [autoUnload, setAutoUnload] = useState(false); // false = keep model in VRAM after generation
+  const [modelInstalled, setModelInstalled] = useState({ luxtts: false, 'qwen3tts_0.6b': false, 'qwen3tts_1.7b': false });
+  const [downloadingState, setDownloadingState] = useState({ downloading: false, model_name: null, progress: 0, error: null });
+  const [showUninstallConfirm, setShowUninstallConfirm] = useState(null); // 'luxtts' | 'qwen3tts_0.6b' | 'qwen3tts_1.7b' | null
+
+  // Redo mode states
+  const [redoBlockId, setRedoBlockId] = useState(null);
+  const [redoClipId, setRedoClipId] = useState(null);
+  const [redoTrackId, setRedoTrackId] = useState(null);
+
+  const MODEL_NAMES = {
+    luxtts: 'LuxTTS 1.7B',
+    'qwen3tts_0.6b': 'Qwen3-TTS 0.6B',
+    'qwen3tts_1.7b': 'Qwen3-TTS 1.7B'
+  };
+
+  const fetchModelInstalledStatus = async () => {
+    try {
+      const res = await fetch('http://127.0.0.1:5555/model_status');
+      if (res.ok) {
+        const data = await res.json();
+        setModelInstalled(data);
+      }
+    } catch (e) {
+      console.error("Error fetching model status", e);
+    }
+  };
   const [splitPercent, setSplitPercent] = useState(60); // left panel % width
   const mainLayoutRef = useRef(null);
   const isDraggingRef = useRef(false);
@@ -28,6 +54,8 @@ export default function VoiceCloneWindow() {
 
   // Generation settings
   const [pauseDuration, setPauseDuration] = useState(0.3);
+  const [temperature, setTemperature] = useState(0.5); // default for luxtts
+  const [speed, setSpeed] = useState(1.0);
   const [generating, setGenerating] = useState(false);
   const [genLogs, setGenLogs] = useState([]);
   const [currentBlockIndex, setCurrentBlockIndex] = useState(-1);
@@ -43,11 +71,11 @@ export default function VoiceCloneWindow() {
   useEffect(() => {
     const applyTheme = () => {
       const activeTheme = localStorage.getItem('theme') || 'default';
-      document.body.classList.remove('theme-dark-gay', 'theme-premiere');
-      if (activeTheme === 'dark-gay') {
-        document.body.classList.add('theme-dark-gay');
-      } else if (activeTheme === 'premiere') {
-        document.body.classList.add('theme-premiere');
+      document.body.classList.remove('theme-blue', 'theme-red');
+      if (activeTheme === 'blue') {
+        document.body.classList.add('theme-blue');
+      } else if (activeTheme === 'red') {
+        document.body.classList.add('theme-red');
       }
     };
 
@@ -70,7 +98,25 @@ export default function VoiceCloneWindow() {
         const state = await window.electronAPI.getActiveProjectState();
         if (state) {
           setCharacters(state.characters || []);
-          setDialogueBlocks(state.dialogueBlocks || []);
+          
+          if (state.redoBlockId) {
+            setRedoBlockId(state.redoBlockId);
+            setRedoClipId(state.redoClipId);
+            setRedoTrackId(state.redoTrackId);
+            const filteredBlocks = (state.dialogueBlocks || []).filter(b => b.id === state.redoBlockId);
+            setDialogueBlocks(filteredBlocks);
+          } else {
+            setDialogueBlocks(state.dialogueBlocks || []);
+            setRedoBlockId(null);
+            setRedoClipId(null);
+            setRedoTrackId(null);
+          }
+
+          // Clear previous generation states to make sure we don't display old results/logs
+          setGeneratedResult(null);
+          setGenLogs([]);
+          setGenerationProgress(0);
+          setCurrentBlockIndex(-1);
           
           // Initialize configs
           const configs = {};
@@ -110,15 +156,27 @@ export default function VoiceCloneWindow() {
           setVoiceConfigs(prev => {
             const next = { ...prev };
             Object.keys(next).forEach(charId => {
-              if (activeVoiceConfigs[charId] && activeVoiceConfigs[charId].refPath) {
-                next[charId] = activeVoiceConfigs[charId];
-                return;
-              }
               const char = activeCharacters.find(c => c.id === charId);
               const charName = char ? char.name.toLowerCase() : '';
               
               // Find matching default voice
               const match = defaultList.find(v => charName.includes(v.name.toLowerCase()) || v.name.toLowerCase().includes(charName));
+              
+              if (activeVoiceConfigs[charId] && activeVoiceConfigs[charId].refPath) {
+                // If it is a default voice, update its parameters from match if found
+                if (activeVoiceConfigs[charId].type === 'default' && match) {
+                  next[charId] = {
+                    ...activeVoiceConfigs[charId],
+                    refPath: match.path,
+                    refText: match.transcript,
+                    presetName: match.name
+                  };
+                } else {
+                  next[charId] = activeVoiceConfigs[charId];
+                }
+                return;
+              }
+              
               if (match) {
                 next[charId] = {
                   type: 'default',
@@ -134,6 +192,15 @@ export default function VoiceCloneWindow() {
       }
     };
 
+    // Listen to changes in project state (for instance when user triggers redo/replace clip)
+    const handleProjectStateUpdated = () => {
+      loadProjectState().then(loadMetadata);
+    };
+
+    if (window.electronAPI && window.electronAPI.onProjectStateUpdated) {
+      window.electronAPI.onProjectStateUpdated(handleProjectStateUpdated);
+    }
+
     loadProjectState().then(loadMetadata);
 
     // Heartbeat check Flask server
@@ -145,13 +212,24 @@ export default function VoiceCloneWindow() {
           setServerOnline(true);
           setModelLoaded(data.model_loaded);
           if (data.model_loaded && data.model_type) {
-            setSelectedModel(data.model_type);
+            setSelectedModel(prev => {
+              if (prev !== data.model_type) {
+                if (data.model_type === 'luxtts') {
+                  setTemperature(0.5);
+                  setSpeed(1.0);
+                } else {
+                  setTemperature(0.0);
+                }
+              }
+              return data.model_type;
+            });
           }
           setGpuName(data.gpu_name || 'CPU');
           if (data.vram_total != null) {
             setVramTotal(data.vram_total);
           }
           setServerStatus('Online');
+          fetchModelInstalledStatus();
         } else {
           setServerOnline(false);
           setServerStatus('Error');
@@ -164,22 +242,55 @@ export default function VoiceCloneWindow() {
 
     checkServer();
     const interval = setInterval(checkServer, 3000);
-    return () => clearInterval(interval);
-  }, [characters.length]);
 
-  // Beforeunload: free GPU VRAM when window is closed
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      // Use keepalive: true so the fetch completes even if the page is unloading
-      try {
-        navigator.sendBeacon('http://127.0.0.1:5555/unload', '{}');
-      } catch (e) {
-        fetch('http://127.0.0.1:5555/unload', { method: 'POST', keepalive: true }).catch(() => {});
+    return () => {
+      clearInterval(interval);
+      if (window.electronAPI && window.electronAPI.removeProjectStateUpdated) {
+        window.electronAPI.removeProjectStateUpdated();
       }
     };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, []);
+  }, [characters.length]);
+
+  // Poll progress while downloading
+  useEffect(() => {
+    let active = true;
+    let pollInterval = null;
+
+    const checkDownloadProgress = async () => {
+      try {
+        const res = await fetch('http://127.0.0.1:5555/download_progress');
+        if (!active) return;
+        if (res.ok) {
+          const data = await res.json();
+          const progressPct = data.total_bytes > 0 ? Math.round((data.downloaded_bytes / data.total_bytes) * 100) : 0;
+          
+          setDownloadingState({
+            downloading: data.downloading,
+            model_name: data.model_name,
+            progress: progressPct,
+            error: data.error
+          });
+
+          if (!data.downloading) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+            fetchModelInstalledStatus();
+          }
+        }
+      } catch (err) {
+        console.error("Error polling download progress", err);
+      }
+    };
+
+    if (downloadingState.downloading) {
+      pollInterval = setInterval(checkDownloadProgress, 1000);
+    }
+
+    return () => {
+      active = false;
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [downloadingState.downloading]);
 
   // Draggable resizer for the main layout panels
   const handleResizerMouseDown = useCallback((e) => {
@@ -212,7 +323,7 @@ export default function VoiceCloneWindow() {
   // 2. Model Controls
   const handleLoadModel = async () => {
     setLoadingModel(true);
-    const modelNameDisplay = selectedModel === 'qwen3tts_0.6b' ? 'Qwen3-TTS 0.6B' : 'LuxTTS 1.7B';
+    const modelNameDisplay = MODEL_NAMES[selectedModel] || selectedModel;
     addLog(`System: Requesting ${modelNameDisplay} load into VRAM...`);
     try {
       const res = await fetch('http://127.0.0.1:5555/load', {
@@ -257,9 +368,16 @@ export default function VoiceCloneWindow() {
     const val = e.target.value;
     setSelectedModel(val);
     
+    if (val === 'luxtts') {
+      setTemperature(0.5);
+      setSpeed(1.0);
+    } else {
+      setTemperature(0.0);
+    }
+    
     if (modelLoaded) {
       setLoadingModel(true);
-      const modelNameDisplay = val === 'qwen3tts_0.6b' ? 'Qwen3-TTS 0.6B' : 'LuxTTS 1.7B';
+      const modelNameDisplay = MODEL_NAMES[val] || val;
       addLog(`System: Hot-swapping model to ${modelNameDisplay}...`);
       try {
         const res = await fetch('http://127.0.0.1:5555/load', {
@@ -402,11 +520,20 @@ export default function VoiceCloneWindow() {
 
         const syncRes = await window.electronAPI.applyTimelineVoices({
           voices,
-          voiceConfigs
+          voiceConfigs,
+          isRedo: !!redoBlockId,
+          redoBlockId,
+          redoClipId,
+          redoTrackId
         });
         
         if (syncRes.success) {
           addLog("Success: All generated audio files added to Media Library! You can close this window.");
+          if (redoBlockId) {
+            setTimeout(() => {
+              window.close();
+            }, 1000);
+          }
         } else {
           throw new Error(`Failed to import voices: ${syncRes.error}`);
         }
@@ -508,6 +635,49 @@ export default function VoiceCloneWindow() {
     setGenLogs(prev => [`[${timeStr}] ${msg}`, ...prev]);
   };
 
+  const handleDownloadModel = async (modelName) => {
+    try {
+      addLog(`System: Starting download for ${MODEL_NAMES[modelName] || modelName}...`);
+      setDownloadingState({ downloading: true, model_name: modelName, progress: 0, error: null });
+      
+      const res = await fetch('http://127.0.0.1:5555/download_model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_name: modelName })
+      });
+      
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to start download");
+      }
+    } catch (err) {
+      addLog(`Error: ${err.message}`);
+      setDownloadingState({ downloading: false, model_name: null, progress: 0, error: err.message });
+    }
+  };
+
+  const handleUninstallModel = async (modelName) => {
+    try {
+      addLog(`System: Uninstalling ${MODEL_NAMES[modelName] || modelName}...`);
+      const res = await fetch('http://127.0.0.1:5555/uninstall_model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_name: modelName })
+      });
+      if (res.ok) {
+        addLog(`System: ${MODEL_NAMES[modelName] || modelName} uninstalled successfully.`);
+        setModelLoaded(false);
+        fetchModelInstalledStatus();
+      } else {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to uninstall model");
+      }
+    } catch (err) {
+      addLog(`Error: ${err.message}`);
+    }
+    setShowUninstallConfirm(null);
+  };
+
   const handleGenerateVoiceover = async () => {
     if (dialogueBlocks.length === 0) {
       alert("No dialogue script parsed. Write a script in the main editor first.");
@@ -535,7 +705,7 @@ export default function VoiceCloneWindow() {
     try {
       // 1. Force load model
       if (!modelLoaded) {
-        const modelNameDisplay = selectedModel === 'qwen3tts_0.6b' ? 'Qwen3-TTS 0.6B' : 'LuxTTS 1.7B';
+        const modelNameDisplay = MODEL_NAMES[selectedModel] || selectedModel;
         addLog(`System: Model not loaded. Loading ${modelNameDisplay} now...`);
         const loadRes = await fetch('http://127.0.0.1:5555/load', {
           method: 'POST',
@@ -568,16 +738,25 @@ export default function VoiceCloneWindow() {
 
         addLog(`Speech Generation [${i + 1}/${dialogueBlocks.length}]: Character '${block.characterName}' speaking...`);
 
+        const bodyPayload = {
+          text: block.text,
+          language: 'English',
+          ref_audio: config.refPath,
+          ref_text: config.refText,
+          save_path: savePath
+        };
+
+        if (temperature !== undefined && temperature !== null) {
+          bodyPayload.temperature = temperature;
+        }
+        if (selectedModel === 'luxtts' && speed !== undefined && speed !== null) {
+          bodyPayload.speed = speed;
+        }
+
         const response = await fetch('http://127.0.0.1:5555/clone', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: block.text,
-            language: 'English',
-            ref_audio: config.refPath,
-            ref_text: config.refText,
-            save_path: savePath
-          })
+          body: JSON.stringify(bodyPayload)
         });
 
         const data = await response.json();
@@ -626,18 +805,18 @@ export default function VoiceCloneWindow() {
           background: var(--bg-primary, #060609);
           color: var(--text-primary, #e3e3e8);
           font-family: var(--font-sans, 'Outfit', 'Inter', sans-serif);
-          padding: 24px;
+          padding: 16px;
           box-sizing: border-box;
           overflow: hidden;
         }
 
         .header {
           display: flex;
-          justify-content: space-between;
-          align-items: center;
+          flex-direction: column;
+          align-items: flex-start;
           border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
-          padding-bottom: 16px;
-          margin-bottom: 20px;
+          padding-bottom: 10px;
+          margin-bottom: 16px;
         }
 
         .header__title {
@@ -648,18 +827,6 @@ export default function VoiceCloneWindow() {
           display: flex;
           align-items: center;
           gap: 8px;
-        }
-
-        .status-bar {
-          background: var(--bg-secondary, rgba(255, 255, 255, 0.03));
-          border: 1px solid var(--border-default, rgba(255, 255, 255, 0.05));
-          border-radius: var(--radius-md, 8px);
-          padding: 12px 16px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          font-size: 13px;
-          margin-bottom: 20px;
         }
 
         .status-indicator {
@@ -728,7 +895,7 @@ export default function VoiceCloneWindow() {
         .left-panel {
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          gap: 12px;
           overflow-y: auto;
           padding-right: 12px;
           min-width: 0;
@@ -763,13 +930,14 @@ export default function VoiceCloneWindow() {
         .right-panel {
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          gap: 8px;
           background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
           border: 1px solid var(--border-default, rgba(255, 255, 255, 0.04));
           border-radius: var(--radius-md, 8px);
-          padding: 16px;
+          padding: 12px;
           min-height: 0;
           min-width: 0;
+          overflow: hidden;
         }
 
         .card {
@@ -821,8 +989,9 @@ export default function VoiceCloneWindow() {
         }
 
         .textarea-control {
-          height: 60px;
-          resize: none;
+          min-height: 80px;
+          height: 120px;
+          resize: vertical;
         }
 
         .input-number {
@@ -834,11 +1003,11 @@ export default function VoiceCloneWindow() {
           background: var(--bg-primary, #020204);
           border: 1px solid var(--border-default, rgba(255, 255, 255, 0.05));
           border-radius: var(--radius-sm, 6px);
-          padding: 10px;
+          padding: 6px;
           flex: 1;
           overflow-y: auto;
           font-family: monospace;
-          font-size: 12px;
+          font-size: 11px;
           color: var(--text-secondary, #a0a0b0);
           display: flex;
           flex-direction: column;
@@ -883,6 +1052,7 @@ export default function VoiceCloneWindow() {
           margin: 0;
           overflow-y: auto;
           flex: 1;
+          min-height: 120px;
         }
 
         .script-item {
@@ -926,84 +1096,180 @@ export default function VoiceCloneWindow() {
 
       {/* Header */}
       <div className="header">
-        <h1 className="header__title">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-          Voice Clone & TTS Engine
-        </h1>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <h1 className="header__title">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            Voice Clone & TTS Engine
+          </h1>
           <button className="btn btn--secondary" onClick={() => window.close()}>Close Window</button>
         </div>
-      </div>
 
-      {/* GPU / Server Status */}
-      <div className="status-bar">
-        <div className="status-indicator">
-          <span className={`dot ${serverOnline ? 'dot--green' : 'dot--red'}`}></span>
-          <span>TTS Service: <strong>{serverStatus}</strong></span>
-        </div>
-        
-        {serverOnline && (
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span>
-              GPU: <strong style={{ color: '#00e5ff' }}>{gpuName}</strong>
-              {vramTotal != null && (
-                <span style={{ color: '#a0a0b0', fontSize: '12px', marginLeft: 4 }}>({vramTotal.toFixed(1)} GB VRAM)</span>
-              )}
-            </span>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Model:</span>
-              <select
-                value={selectedModel}
-                onChange={handleModelChange}
-                disabled={loadingModel || generating || unloadingModel}
+        {/* Compact Integrated Status Row */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#a0a0b0', flexWrap: 'wrap', gap: '8px', width: '100%', marginTop: '4px' }}>
+          <div className="status-indicator">
+            <span className={`dot ${serverOnline ? 'dot--green' : 'dot--red'}`} style={{ width: 6, height: 6 }}></span>
+            <span>TTS Service: <strong>{serverStatus}</strong></span>
+          </div>
+          
+          {serverOnline && (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span>
+                GPU: <strong style={{ color: '#00e5ff' }}>{gpuName}</strong>
+                {vramTotal != null && (
+                  <span style={{ color: '#a0a0b0', fontSize: '10px', marginLeft: 4 }}>({vramTotal.toFixed(1)} GB VRAM)</span>
+                )}
+              </span>
+              
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <span>Model:</span>
+                <select
+                  value={selectedModel}
+                  onChange={handleModelChange}
+                  disabled={loadingModel || generating || unloadingModel || downloadingState.downloading}
+                  style={{
+                    background: '#1a1a24',
+                    color: '#ffffff',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '4px',
+                    padding: '2px 6px',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    fontFamily: 'inherit'
+                  }}
+                >
+                  <option value="luxtts">LuxTTS 1.7B Distilled (~1 GB VRAM)</option>
+                  <option value="qwen3tts_0.6b">Qwen3-TTS 0.6B Base (~3 GB VRAM)</option>
+                  <option value="qwen3tts_1.7b">Qwen3-TTS 1.7B Base (~6 GB VRAM)</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{
+                  fontSize: '9px',
+                  padding: '1px 4px',
+                  borderRadius: '3px',
+                  fontWeight: '600',
+                  background: modelInstalled[selectedModel] ? 'rgba(0, 230, 118, 0.1)' : 'rgba(255, 171, 64, 0.1)',
+                  color: modelInstalled[selectedModel] ? 'var(--accent-success, #00e676)' : 'var(--accent-warning, #ffab40)',
+                  border: `1px solid ${modelInstalled[selectedModel] ? 'rgba(0, 230, 118, 0.2)' : 'rgba(255, 171, 64, 0.2)'}`,
+                  display: 'inline-flex',
+                  alignItems: 'center'
+                }}>
+                  {modelInstalled[selectedModel] ? 'Installed' : 'Not Installed'}
+                </span>
+
+                {modelInstalled[selectedModel] ? (
+                  <button
+                    onClick={() => setShowUninstallConfirm(selectedModel)}
+                    title="Uninstall model from this PC"
+                    disabled={loadingModel || unloadingModel || generating}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#ff5252',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      outline: 'none'
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                  </button>
+                ) : (
+                  downloadingState.downloading && downloadingState.model_name === selectedModel ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div style={{ position: 'relative', width: 14, height: 14, display: 'flex', alignItems: 'center' }}>
+                        <svg width="14" height="14" viewBox="0 0 20 20">
+                          <circle cx="10" cy="10" r="8" fill="none" stroke="#2a2a3a" strokeWidth="3" />
+                          <circle
+                            cx="10"
+                            cy="10"
+                            r="8"
+                            fill="none"
+                            stroke="var(--accent-primary, #7c4dff)"
+                            strokeWidth="3"
+                            strokeDasharray={2 * Math.PI * 8}
+                            strokeDashoffset={2 * Math.PI * 8 * (1 - downloadingState.progress / 100)}
+                            strokeLinecap="round"
+                            transform="rotate(-90 10 10)"
+                          />
+                        </svg>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleDownloadModel(selectedModel)}
+                      title="Download model to this PC"
+                      disabled={downloadingState.downloading}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--accent-primary, #7c4dff)',
+                        cursor: 'pointer',
+                        padding: '2px',
+                        borderRadius: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        outline: 'none'
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                      </svg>
+                    </button>
+                  )
+                )}
+              </div>
+
+              <div className="status-indicator">
+                <span className={`dot ${modelLoaded ? 'dot--green' : 'dot--yellow'}`} style={{ width: 6, height: 6 }}></span>
+                <span>VRAM: <strong>{modelLoaded ? 'Loaded' : 'Free'}</strong></span>
+              </div>
+
+              <label
+                title="When ON, the model is unloaded from GPU VRAM after generation finishes. When OFF, it stays loaded for faster re-generation."
                 style={{
-                  background: '#1a1a24',
-                  color: '#ffffff',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: '4px',
-                  padding: '4px 8px',
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                  outline: 'none',
-                  fontFamily: 'inherit'
+                  display: 'flex', alignItems: 'center', gap: 4, fontSize: '11px',
+                  cursor: 'pointer', color: autoUnload ? '#ffd740' : '#a0a0b0',
+                  userSelect: 'none'
                 }}
               >
-                <option value="luxtts">LuxTTS 1.7B Distilled (~1 GB VRAM)</option>
-                <option value="qwen3tts_0.6b">Qwen3-TTS 0.6B Base (~3 GB VRAM)</option>
-              </select>
+                <input
+                  type="checkbox"
+                  checked={autoUnload}
+                  onChange={e => setAutoUnload(e.target.checked)}
+                  style={{ accentColor: '#ffd740' }}
+                />
+                Auto-Unload
+              </label>
+
+              {modelLoaded ? (
+                <button className="btn btn--secondary" style={{ padding: '2px 6px', fontSize: '10px' }} onClick={handleUnloadModel} disabled={unloadingModel || generating}>
+                  {unloadingModel ? 'Release...' : 'Release VRAM'}
+                </button>
+              ) : (
+                <button 
+                  className="btn btn--accent" 
+                  style={{ padding: '2px 6px', fontSize: '10px' }}
+                  onClick={handleLoadModel} 
+                  disabled={loadingModel || generating || !modelInstalled[selectedModel] || downloadingState.downloading}
+                  title={!modelInstalled[selectedModel] ? "Please download the model first" : "Load model into VRAM"}
+                >
+                  {loadingModel ? 'Loading...' : 'Preload Model'}
+                </button>
+              )}
             </div>
-            <div className="status-indicator">
-              <span className={`dot ${modelLoaded ? 'dot--green' : 'dot--yellow'}`}></span>
-              <span>Model: <strong>{modelLoaded ? 'In VRAM' : 'Unloaded'}</strong></span>
-            </div>
-            {/* Auto-Unload Toggle */}
-            <label
-              title="When ON, the model is unloaded from GPU VRAM after generation finishes. When OFF, it stays loaded for faster re-generation."
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5, fontSize: '12px',
-                cursor: 'pointer', color: autoUnload ? '#ffd740' : '#a0a0b0',
-                userSelect: 'none'
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={autoUnload}
-                onChange={e => setAutoUnload(e.target.checked)}
-                style={{ accentColor: '#ffd740' }}
-              />
-              Auto-Unload
-            </label>
-            {modelLoaded ? (
-              <button className="btn btn--secondary" onClick={handleUnloadModel} disabled={unloadingModel || generating}>
-                {unloadingModel ? 'Clearing...' : 'Release GPU VRAM'}
-              </button>
-            ) : (
-              <button className="btn btn--accent" onClick={handleLoadModel} disabled={loadingModel || generating}>
-                {loadingModel ? 'Loading...' : 'Preload Model'}
-              </button>
-            )}
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Layout */}
@@ -1134,7 +1400,7 @@ export default function VoiceCloneWindow() {
         <div className="resizer-bar" onMouseDown={handleResizerMouseDown} title="Drag to resize panels" />
 
         {/* Right Output & Progress Panel */}
-        <div className="right-panel" style={{ flex: 1 }}>
+        <div className="right-panel" style={{ flex: 1, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 className="card__title" style={{ color: '#fff' }}>Audio & Captions Sync</h3>
           </div>
@@ -1151,6 +1417,90 @@ export default function VoiceCloneWindow() {
               disabled={generating}
             />
             <span style={{ fontSize: '11px', color: '#a0a0b0' }}>seconds added between lines</span>
+          </div>
+
+          {/* Model-specific Parameters */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            marginTop: 4,
+            padding: 12,
+            background: 'var(--bg-primary, #0f0f15)',
+            border: '1px solid var(--border-strong, rgba(255, 255, 255, 0.08))',
+            borderRadius: '6px'
+          }}>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#ffffff', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              Model Settings ({MODEL_NAMES[selectedModel] || selectedModel})
+            </span>
+
+            {/* Temperature parameter */}
+            <div className="form-row" style={{ justifyContent: 'space-between' }}>
+              <span style={{ color: '#a0a0b0', minWidth: 80 }}>Temperature:</span>
+              <input
+                type="range"
+                min="0.0"
+                max="2.0"
+                step="0.05"
+                value={temperature}
+                onChange={(e) => setTemperature(parseFloat(e.target.value) === 0 ? 0.0 : (parseFloat(e.target.value) || 0.0))}
+                style={{ flex: 1, accentColor: 'var(--accent-primary, #7c4dff)', cursor: 'pointer' }}
+                disabled={generating}
+              />
+              <span style={{ fontSize: '11px', color: '#a0a0b0', minWidth: '45px', textAlign: 'right' }}>
+                {temperature === 0 ? 'Greedy' : temperature.toFixed(2)}
+              </span>
+              <input
+                type="number"
+                className="form-control input-number"
+                min="0.0"
+                max="2.0"
+                step="0.05"
+                value={temperature}
+                onChange={(e) => {
+                  let val = parseFloat(e.target.value);
+                  if (isNaN(val)) return;
+                  val = Math.max(0.0, Math.min(2.0, val));
+                  setTemperature(val);
+                }}
+                style={{ width: '60px', padding: '4px 6px', textAlign: 'center' }}
+                disabled={generating}
+              />
+            </div>
+
+            {/* Speed parameter (compatible with LuxTTS only) */}
+            {selectedModel === 'luxtts' && (
+              <div className="form-row" style={{ justifyContent: 'space-between' }}>
+                <span style={{ color: '#a0a0b0', minWidth: 80 }}>Speed:</span>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2.0"
+                  step="0.1"
+                  value={speed}
+                  onChange={(e) => setSpeed(parseFloat(e.target.value) || 1.0)}
+                  style={{ flex: 1, accentColor: 'var(--accent-primary, #7c4dff)', cursor: 'pointer' }}
+                  disabled={generating}
+                />
+                <input
+                  type="number"
+                  className="form-control input-number"
+                  min="0.5"
+                  max="2.0"
+                  step="0.1"
+                  value={speed}
+                  onChange={(e) => {
+                    let val = parseFloat(e.target.value);
+                    if (isNaN(val)) return;
+                    val = Math.max(0.5, Math.min(2.0, val));
+                    setSpeed(val);
+                  }}
+                  style={{ width: '60px', padding: '4px 6px', textAlign: 'center' }}
+                  disabled={generating}
+                />
+              </div>
+            )}
           </div>
 
           {/* Script sequence list */}
@@ -1210,7 +1560,7 @@ export default function VoiceCloneWindow() {
                 onClick={handleApplyResult}
               >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0 }}><polyline points="20 6 9 17 4 12"/></svg>
-                Accept & Add to Media Library
+                {redoBlockId ? 'Apply Selected Clip' : 'Accept & Add to Media Library'}
               </button>
             </div>
           ) : (
@@ -1226,8 +1576,8 @@ export default function VoiceCloneWindow() {
           )}
 
           {/* System Logs */}
-          <div style={{ display: 'flex', flexDirection: 'column', height: '140px', minHeight: '140px' }}>
-            <span style={{ fontSize: '11px', color: '#a0a0b0', marginBottom: 4 }}>Operations Log</span>
+          <div style={{ display: 'flex', flexDirection: 'column', height: '70px', minHeight: '70px', maxHeight: '70px', flexShrink: 0 }}>
+            <span style={{ fontSize: '11px', color: '#a0a0b0', marginBottom: 2 }}>Operations Log</span>
             <div className="logs-container">
               {genLogs.length === 0 ? (
                 <div style={{ color: '#444455' }}>No active processes logged yet.</div>
@@ -1241,6 +1591,56 @@ export default function VoiceCloneWindow() {
         </div>
 
       </div>
+
+      {/* Uninstall Confirmation Modal */}
+      {showUninstallConfirm && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000
+        }}>
+          <div style={{
+            background: '#1a1a24',
+            border: '1px solid var(--border-strong, #3e3e3e)',
+            borderRadius: '6px',
+            padding: '20px',
+            width: '320px',
+            boxShadow: 'var(--shadow-lg)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16
+          }}>
+            <h3 style={{ margin: 0, fontSize: '15px', color: '#ffffff' }}>Confirm Uninstallation</h3>
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+              Are you sure you want to uninstall the <strong>{MODEL_NAMES[showUninstallConfirm] || showUninstallConfirm}</strong> model from this device? This will free up local disk space.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button 
+                className="btn btn--secondary" 
+                onClick={() => setShowUninstallConfirm(null)}
+                style={{ padding: '6px 12px', fontSize: '12px' }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn" 
+                onClick={() => handleUninstallModel(showUninstallConfirm)}
+                style={{ background: '#ff5252', color: '#ffffff', padding: '6px 12px', fontSize: '12px' }}
+              >
+                Uninstall
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useProject } from '../store/ProjectContext';
 import { drawFrame, getCaptionTextForTime } from '../engine/renderEngine';
-import { getAnimatedTransform, getActiveBlocks } from '../engine/animationEngine';
+import { getAnimatedTransform, getActiveBlocks, getInterpolatedKeyframeTransform } from '../engine/animationEngine';
 
 /**
  * Video Preview Panel with canvas-based rendering and free transform handles
@@ -15,8 +15,12 @@ export default function PreviewCanvas() {
   const audioElementsRef = useRef({});
   const videoElementsRef = useRef({});
   const playStartRef = useRef(null);
+  const localTimeRef = useRef(0);
+  const lastDispatchRef = useRef(0);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [dragging, setDragging] = useState(null); // { type: 'move'|'resize', elementId, startX, startY, origTransform, cx, cy, origDist }
+  const [transformMode, setTransformMode] = useState('standard'); // 'standard' | 'skew'
+  const [hoveredAxis, setHoveredAxis] = useState(null);
   const loadedImagesRef = useRef({});
 
   // Target aspect ratio (9:16 vertical)
@@ -91,17 +95,27 @@ export default function PreviewCanvas() {
 
     audioClips.forEach(clip => {
       let audioEl = audioElementsRef.current[clip.id];
-      if (!audioEl) {
+      const srcUrl = clip.dataUrl || `file:///${clip.path.replace(/\\/g, '/')}`;
+      if (!audioEl || audioEl.datasetSrc !== srcUrl) {
+        if (audioEl) {
+          audioEl.pause();
+        }
         audioEl = new Audio();
-        audioEl.src = clip.dataUrl || `file:///${clip.path.replace(/\\/g, '/')}`;
+        audioEl.src = srcUrl;
+        audioEl.datasetSrc = srcUrl;
         audioEl.load();
         audioElementsRef.current[clip.id] = audioEl;
       }
 
+      // Apply volume and speed
+      audioEl.volume = clip.volume ?? 1.0;
+      // Note: playbackRate needs to be set after source is loaded/changed
+      audioEl.playbackRate = clip.speed ?? 1.0;
+
       const isActive = now >= clip.startTime && now < (clip.startTime + clip.duration);
 
       if (isActive && isPlaying) {
-        const targetTime = now - clip.startTime;
+        const targetTime = (now - clip.startTime) * (clip.speed ?? 1.0);
         if (Math.abs(audioEl.currentTime - targetTime) > 0.15) {
           audioEl.currentTime = targetTime;
         }
@@ -112,8 +126,8 @@ export default function PreviewCanvas() {
         if (!audioEl.paused) {
           audioEl.pause();
         }
-        const targetTime = Math.max(0, now - clip.startTime);
-        if (targetTime < clip.duration && Math.abs(audioEl.currentTime - targetTime) > 0.1) {
+        const targetTime = Math.max(0, (now - clip.startTime) * (clip.speed ?? 1.0));
+        if (targetTime < (clip.duration * (clip.speed ?? 1.0)) && Math.abs(audioEl.currentTime - targetTime) > 0.1) {
           audioEl.currentTime = targetTime;
         }
       }
@@ -141,20 +155,30 @@ export default function PreviewCanvas() {
 
     videoClips.forEach(clip => {
       let videoEl = videoElementsRef.current[clip.id];
-      if (!videoEl) {
+      const srcUrl = clip.dataUrl || `file:///${clip.path.replace(/\\/g, '/')}`;
+      if (!videoEl || videoEl.datasetSrc !== srcUrl) {
+        if (videoEl) {
+          videoEl.pause();
+        }
         videoEl = document.createElement('video');
         videoEl.muted = true;
         videoEl.playsInline = true;
-        videoEl.src = clip.dataUrl || `file:///${clip.path.replace(/\\/g, '/')}`;
+        videoEl.src = srcUrl;
+        videoEl.datasetSrc = srcUrl;
         videoEl.load();
         videoElementsRef.current[clip.id] = videoEl;
       }
+
+      // Apply volume and speed
+      videoEl.muted = (clip.volume ?? 1.0) === 0;
+      videoEl.volume = clip.volume ?? 1.0;
+      videoEl.playbackRate = clip.speed ?? 1.0;
 
       const isActive = now >= clip.startTime && now < (clip.startTime + clip.duration);
 
       if (isActive && isPlaying) {
         const duration = videoEl.duration || clip.duration || 1;
-        const targetTime = (now - clip.startTime) % duration;
+        const targetTime = ((now - clip.startTime) * (clip.speed ?? 1.0)) % duration;
         if (Math.abs(videoEl.currentTime - targetTime) > 0.15) {
           videoEl.currentTime = targetTime;
         }
@@ -166,8 +190,8 @@ export default function PreviewCanvas() {
           videoEl.pause();
         }
         const duration = videoEl.duration || clip.duration || 1;
-        const targetTime = (now - clip.startTime) % duration;
-        if (targetTime >= 0 && targetTime < clip.duration && Math.abs(videoEl.currentTime - targetTime) > 0.1) {
+        const targetTime = ((now - clip.startTime) * (clip.speed ?? 1.0)) % duration;
+        if (targetTime >= 0 && targetTime < (clip.duration * (clip.speed ?? 1.0)) && Math.abs(videoEl.currentTime - targetTime) > 0.1) {
           videoEl.currentTime = targetTime;
         }
       }
@@ -308,22 +332,26 @@ export default function PreviewCanvas() {
     const ctx = canvas.getContext('2d');
     const { width, height } = canvas;
 
+    const renderTime = state.isPlaying ? localTimeRef.current : state.currentTime;
+
     let bgFrame = null;
     if (preRenderedFramesRef.current.length > 0) {
-      const frameIdx = Math.floor(state.currentTime * preRenderFps);
+      const frameIdx = Math.floor(renderTime * preRenderFps);
       bgFrame = preRenderedFramesRef.current[frameIdx % preRenderedFramesRef.current.length];
     }
 
     drawFrame(ctx, {
       state,
-      time: state.currentTime,
+      time: renderTime,
       width,
       height,
       loadedImages: loadedImagesRef.current,
       videoElement: bgFrame || videoElementsRef.current,
       drawHandles: true,
+      transformMode,
+      activeAxis: (dragging?.type === 'rotate3d' ? dragging.lockedAxis : hoveredAxis),
     });
-  }, [state, canvasSize]);
+  }, [state, canvasSize, transformMode, dragging, hoveredAxis]);
 
   // Animation loop
   useEffect(() => {
@@ -341,10 +369,12 @@ export default function PreviewCanvas() {
   useEffect(() => {
     if (!state.isPlaying) {
       playStartRef.current = null;
+      localTimeRef.current = state.currentTime;
       return;
     }
 
     playStartRef.current = performance.now() - state.currentTime * 1000;
+    lastDispatchRef.current = performance.now();
 
     const tick = () => {
       if (!playStartRef.current) return;
@@ -352,15 +382,33 @@ export default function PreviewCanvas() {
       if (elapsed >= state.totalDuration) {
         actions.setPlaying(false);
         actions.setCurrentTime(0);
+        localTimeRef.current = 0;
         return;
       }
-      actions.setCurrentTime(elapsed);
+
+      // Update local unthrottled time ref
+      localTimeRef.current = elapsed;
+
+      // Throttled dispatch to React state once every 100ms
+      const now = performance.now();
+      if (now - lastDispatchRef.current > 100) {
+        actions.setCurrentTime(elapsed);
+        lastDispatchRef.current = now;
+      }
+
       playbackAnimFrameRef.current = requestAnimationFrame(tick);
     };
     
     playbackAnimFrameRef.current = requestAnimationFrame(tick);
     return () => {
-      if (playbackAnimFrameRef.current) cancelAnimationFrame(playbackAnimFrameRef.current);
+      if (playbackAnimFrameRef.current) {
+        cancelAnimationFrame(playbackAnimFrameRef.current);
+      }
+      // Ensure we write back the final precise time on stop/pause
+      if (playStartRef.current) {
+        const elapsed = (performance.now() - playStartRef.current) / 1000;
+        actions.setCurrentTime(Math.min(state.totalDuration, elapsed));
+      }
     };
   }, [state.isPlaying]);
 
@@ -376,16 +424,57 @@ export default function PreviewCanvas() {
 
     const activeBlocks = getActiveBlocks(state.dialogueBlocks, state.currentTime);
 
+    // Check if clicking on any keyframe diamond marker for the selected element in the viewport
+    if (state.selectedElementId) {
+      const char = state.characters.find(c => c.id === state.selectedElementId);
+      if (char && char.keyframingEnabled && char.keyframes) {
+        let hitKfIdx = -1;
+        char.keyframes.forEach((kf, idx) => {
+          const kfX = kf.x * scaleFactor;
+          const kfY = kf.y * scaleFactor;
+          const dist = Math.sqrt((x - kfX) ** 2 + (y - kfY) ** 2);
+          if (dist <= 10) {
+            hitKfIdx = idx;
+          }
+        });
+        
+        if (hitKfIdx !== -1) {
+          e.stopPropagation();
+          const targetKf = char.keyframes[hitKfIdx];
+          
+          actions.selectKeyframe(hitKfIdx);
+          actions.setCurrentTime(targetKf.time);
+          
+          setDragging({
+            type: 'move',
+            elementId: state.selectedElementId,
+            startX: x,
+            startY: y,
+            origTransform: targetKf,
+            keyframeIndex: hitKfIdx,
+          });
+          return;
+        }
+      }
+    }
+
     // 1. Check if clicking on the resize handle of the currently selected element
     if (state.selectedElementId) {
       let cx, cy, w, h;
       const isCaption = state.selectedElementId.startsWith('caption_');
-      const currentTransform = state.characterTransforms[state.selectedElementId] || {
+      let currentTransform = state.characterTransforms[state.selectedElementId] || {
         x: state.canvasWidth / 2,
         y: isCaption ? state.canvasHeight * 0.85 : state.canvasHeight * 0.65,
         scale: 1,
         rotation: 0,
       };
+
+      if (!isCaption) {
+        const char = state.characters.find(c => c.id === state.selectedElementId);
+        if (char && char.keyframingEnabled && char.keyframes?.length > 0) {
+          currentTransform = getInterpolatedKeyframeTransform(char.keyframes, state.currentTime);
+        }
+      }
 
       if (isCaption) {
         const charId = state.selectedElementId.replace('caption_', '');
@@ -460,32 +549,104 @@ export default function PreviewCanvas() {
       }
 
       if (cx !== undefined && cy !== undefined && w !== undefined && h !== undefined) {
-        const handles = [
-          { x: cx - w / 2, y: cy - h / 2 },
-          { x: cx + w / 2, y: cy - h / 2 },
-          { x: cx - w / 2, y: cy + h / 2 },
-          { x: cx + w / 2, y: cy + h / 2 },
-        ];
-        let hitHandleIndex = -1;
-        for (let i = 0; i < handles.length; i++) {
-          const dist = Math.sqrt((x - handles[i].x) ** 2 + (y - handles[i].y) ** 2);
-          if (dist <= 10) {
-            hitHandleIndex = i;
-            break;
+        // Resolve character transforms
+        const rotation = currentTransform.rotation || 0;
+        const rotateX = currentTransform.rotateX || 0;
+        const rotateY = currentTransform.rotateY || 0;
+        const skewX = currentTransform.skewX || 0;
+        const skewY = currentTransform.skewY || 0;
+        const flipX = currentTransform.flipX ?? 1;
+        const flipY = currentTransform.flipY ?? 1;
+
+        // Project a local handle point (lx, ly) to screen space (x, y)
+        const projectPoint = (lx, ly) => {
+          // 1. Scale & Flip
+          const scaleX = Math.cos(rotateY * Math.PI / 180) * flipX;
+          const scaleY = Math.cos(rotateX * Math.PI / 180) * flipY;
+          let px = lx * scaleX;
+          let py = ly * scaleY;
+
+          // 2. Skew
+          const tanSkewX = Math.tan(skewX * Math.PI / 180);
+          const tanSkewY = Math.tan(skewY * Math.PI / 180);
+          const sx = px + py * tanSkewX;
+          const sy = px * tanSkewY + py;
+
+          // 3. Rotate
+          const rotRad = rotation * Math.PI / 180;
+          const rx = sx * Math.cos(rotRad) - sy * Math.sin(rotRad);
+          const ry = sx * Math.sin(rotRad) + sy * Math.cos(rotRad);
+
+          // 4. Translate
+          return {
+            x: cx + rx,
+            y: cy + ry
+          };
+        };
+
+        // 1. Check if clicking on rotation handle
+        if (!isCaption && transformMode !== 'skew' && transformMode !== 'rotate3d') {
+          const rotHandleScreen = projectPoint(0, -h / 2 - 24);
+          const dist = Math.sqrt((x - rotHandleScreen.x) ** 2 + (y - rotHandleScreen.y) ** 2);
+          if (dist <= 15) { // 15px hit tolerance
+            actions.startDragHistory();
+            setDragging({
+              type: 'rotate',
+              elementId: state.selectedElementId,
+              cx,
+              cy,
+              origTransform: currentTransform,
+              startAngle: Math.atan2(y - cy, x - cx) * 180 / Math.PI,
+            });
+            return;
           }
         }
 
-        if (hitHandleIndex !== -1) {
-          actions.startDragHistory();
-          setDragging({
-            type: 'resize',
-            elementId: state.selectedElementId,
-            cx,
-            cy,
-            origTransform: currentTransform,
-            origDist: Math.sqrt((x - cx) ** 2 + (y - cy) ** 2),
-          });
-          return;
+        // 2. Check if clicking on resize / skew handles
+        if (transformMode !== 'rotate3d') {
+          const corners = [
+            { lx: -w / 2, ly: -h / 2, index: 0 },
+            { lx: w / 2, ly: -h / 2, index: 1 },
+            { lx: -w / 2, ly: h / 2, index: 2 },
+            { lx: w / 2, ly: h / 2, index: 3 },
+          ];
+          let hitHandleIndex = -1;
+          for (let i = 0; i < corners.length; i++) {
+            const screenPos = projectPoint(corners[i].lx, corners[i].ly);
+            const dist = Math.sqrt((x - screenPos.x) ** 2 + (y - screenPos.y) ** 2);
+            if (dist <= 15) { // 15px hit box
+              hitHandleIndex = i;
+              break;
+            }
+          }
+
+          if (hitHandleIndex !== -1) {
+            actions.startDragHistory();
+            
+            if (transformMode === 'skew') {
+              setDragging({
+                type: 'skew',
+                elementId: state.selectedElementId,
+                cx,
+                cy,
+                origTransform: currentTransform,
+                startX: x,
+                startY: y,
+                handleIndex: hitHandleIndex,
+              });
+            } else {
+              const screenPos = projectPoint(corners[hitHandleIndex].lx, corners[hitHandleIndex].ly);
+              setDragging({
+                type: 'resize',
+                elementId: state.selectedElementId,
+                cx,
+                cy,
+                origTransform: currentTransform,
+                origDist: Math.sqrt((screenPos.x - cx) ** 2 + (screenPos.y - cy) ** 2),
+              });
+            }
+            return;
+          }
         }
       }
     }
@@ -569,21 +730,26 @@ export default function PreviewCanvas() {
 
     // 3. Check if clicking on active character PNG
     let clickedChar = null;
+    let clickedTransform = null;
     for (const block of activeBlocks) {
       const char = state.characters.find(c => c.id === block.characterId);
       if (!char) continue;
-      const transform = state.characterTransforms[char.id] || {
+      let transform = state.characterTransforms[char.id] || {
         x: state.canvasWidth / 2,
         y: state.canvasHeight * 0.65,
         scale: 1,
         rotation: 0,
       };
+      if (char.keyframingEnabled && char.keyframes?.length > 0) {
+        transform = getInterpolatedKeyframeTransform(char.keyframes, state.currentTime);
+      }
       const displayCx = transform.x * scaleFactor;
       const displayCy = transform.y * scaleFactor;
       const charSize = 640 * (transform.scale || 1) * scaleFactor;
       const dist = Math.sqrt((x - displayCx) ** 2 + (y - displayCy) ** 2);
       if (dist < charSize / 2 + 10) {
         clickedChar = char;
+        clickedTransform = transform;
         break;
       }
     }
@@ -591,25 +757,74 @@ export default function PreviewCanvas() {
     if (clickedChar) {
       actions.selectElement(clickedChar.id);
       actions.startDragHistory();
-      setDragging({
-        type: 'move',
-        elementId: clickedChar.id,
-        startX: x,
-        startY: y,
-        origTransform: state.characterTransforms[clickedChar.id] || {
-          x: state.canvasWidth / 2,
-          y: state.canvasHeight * 0.65,
-          scale: 1,
-          rotation: 0,
-        },
-      });
+      if (transformMode === 'rotate3d') {
+        const cx = (clickedTransform?.x ?? (state.canvasWidth / 2)) * scaleFactor;
+        const cy = (clickedTransform?.y ?? (state.canvasHeight * 0.65)) * scaleFactor;
+        const w = 640 * (clickedTransform?.scale ?? 1) * scaleFactor;
+        const h = 640 * (clickedTransform?.scale ?? 1) * scaleFactor;
+        const rotation = clickedTransform?.rotation ?? 0;
+
+        // Project mouse coordinate relative to center
+        const dx = x - cx;
+        const dy = y - cy;
+        const rad = -rotation * Math.PI / 180;
+        const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+        const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+
+        let lockedAxis = null;
+        const distX = Math.abs(localY); // distance to horizontal axis
+        const distY = Math.abs(localX); // distance to vertical axis
+
+        // Check if click is within the character box boundaries and close to either axis
+        if (Math.abs(localX) <= w / 2 && Math.abs(localY) <= h / 2) {
+          if (distX <= 18 && distY <= 18) {
+            lockedAxis = distX < distY ? 'X' : 'Y';
+          } else if (distX <= 18) {
+            lockedAxis = 'X';
+          } else if (distY <= 18) {
+            lockedAxis = 'Y';
+          }
+        }
+
+        if (lockedAxis) {
+          setDragging({
+            type: 'rotate3d',
+            elementId: clickedChar.id,
+            startX: x,
+            startY: y,
+            origTransform: clickedTransform || {
+              x: state.canvasWidth / 2,
+              y: state.canvasHeight * 0.65,
+              scale: 1,
+              rotation: 0,
+              rotateX: 0,
+              rotateY: 0,
+            },
+            lockedAxis,
+          });
+        } else {
+          actions.endDragHistory();
+        }
+      } else {
+        setDragging({
+          type: 'move',
+          elementId: clickedChar.id,
+          startX: x,
+          startY: y,
+          origTransform: clickedTransform || {
+            x: state.canvasWidth / 2,
+            y: state.canvasHeight * 0.65,
+            scale: 1,
+            rotation: 0,
+          },
+        });
+      }
     } else {
       actions.selectElement(null);
     }
   };
 
   const handleCanvasMouseMove = (e) => {
-    if (!dragging) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -617,21 +832,187 @@ export default function PreviewCanvas() {
     const y = e.clientY - rect.top;
     const scaleFactor = canvasSize.width / state.canvasWidth;
 
+    if (!dragging) {
+      if (transformMode === 'rotate3d' && state.selectedElementId) {
+        const isCaption = state.selectedElementId.startsWith('caption_');
+        if (!isCaption) {
+          const char = state.characters.find(c => c.id === state.selectedElementId);
+          const activeBlocks = getActiveBlocks(state.dialogueBlocks, state.currentTime);
+          const block = activeBlocks.find(b => b.characterId === state.selectedElementId);
+          if (char && block) {
+            const defaultTransform = state.characterTransforms[char.id] || { x: state.canvasWidth / 2, y: state.canvasHeight * 0.65, scale: 1, rotation: 0 };
+            const baseTransform = char.keyframingEnabled && char.keyframes?.length > 0
+              ? getInterpolatedKeyframeTransform(char.keyframes, state.currentTime)
+              : defaultTransform;
+            const animTransform = getAnimatedTransform(block, baseTransform, state.currentTime);
+            if (animTransform) {
+              const cx = animTransform.x * scaleFactor;
+              const cy = animTransform.y * scaleFactor;
+              const w = 640 * animTransform.scale * scaleFactor;
+              const h = 640 * animTransform.scale * scaleFactor;
+              const rotation = animTransform.rotation || 0;
+
+              const dx = x - cx;
+              const dy = y - cy;
+              const rad = -rotation * Math.PI / 180;
+              const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+              const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+
+              let axis = null;
+              const distX = Math.abs(localY);
+              const distY = Math.abs(localX);
+
+              if (Math.abs(localX) <= w / 2 && Math.abs(localY) <= h / 2) {
+                if (distX <= 18 && distY <= 18) {
+                  axis = distX < distY ? 'X' : 'Y';
+                } else if (distX <= 18) {
+                  axis = 'X';
+                } else if (distY <= 18) {
+                  axis = 'Y';
+                }
+              }
+              setHoveredAxis(axis);
+              return;
+            }
+          }
+        }
+      }
+      setHoveredAxis(null);
+      return;
+    }
+
     if (dragging.type === 'resize') {
       const currentDist = Math.sqrt((x - dragging.cx) ** 2 + (y - dragging.cy) ** 2);
       const newScale = Math.max(0.2, Math.min(3, dragging.origTransform.scale * (currentDist / dragging.origDist)));
-      actions.setCharacterTransform(dragging.elementId, {
-        ...dragging.origTransform,
-        scale: newScale,
-      });
+      
+      const isCaption = dragging.elementId.startsWith('caption_');
+      const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
+      if (char && char.keyframingEnabled) {
+        const newTransform = {
+          ...dragging.origTransform,
+          scale: newScale,
+        };
+        actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
+      } else {
+        actions.setCharacterTransform(dragging.elementId, {
+          ...dragging.origTransform,
+          scale: newScale,
+        });
+      }
     } else if (dragging.type === 'move') {
       const dx = x - dragging.startX;
       const dy = y - dragging.startY;
-      actions.setCharacterTransform(dragging.elementId, {
-        ...dragging.origTransform,
-        x: dragging.origTransform.x + dx / scaleFactor,
-        y: dragging.origTransform.y + dy / scaleFactor,
-      });
+      const newX = dragging.origTransform.x + dx / scaleFactor;
+      const newY = dragging.origTransform.y + dy / scaleFactor;
+
+      const isCaption = dragging.elementId.startsWith('caption_');
+      const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
+      if (char && char.keyframingEnabled) {
+        const newTransform = {
+          ...dragging.origTransform,
+          x: newX,
+          y: newY,
+        };
+        if (dragging.keyframeIndex !== undefined) {
+          actions.updateCharacterKeyframe(char.id, dragging.keyframeIndex, newTransform);
+        } else {
+          actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
+        }
+      } else {
+        actions.setCharacterTransform(dragging.elementId, {
+          ...dragging.origTransform,
+          x: newX,
+          y: newY,
+        });
+      }
+    } else if (dragging.type === 'rotate') {
+      const angle = Math.atan2(y - dragging.cy, x - dragging.cx) * 180 / Math.PI;
+      const deltaAngle = angle - dragging.startAngle;
+      const newRotation = Math.round((dragging.origTransform.rotation + deltaAngle + 360) % 360);
+      
+      const isCaption = dragging.elementId.startsWith('caption_');
+      const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
+      if (char && char.keyframingEnabled) {
+        const newTransform = {
+          ...dragging.origTransform,
+          rotation: newRotation,
+        };
+        actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
+      } else {
+        actions.setCharacterTransform(dragging.elementId, {
+          ...dragging.origTransform,
+          rotation: newRotation,
+        });
+      }
+    } else if (dragging.type === 'skew') {
+      const dx = x - dragging.startX;
+      const dy = y - dragging.startY;
+      
+      const prevSkewX = dragging.origTransform.skewX ?? 0;
+      const prevSkewY = dragging.origTransform.skewY ?? 0;
+      
+      let newSkewX = prevSkewX;
+      let newSkewY = prevSkewY;
+      
+      // Determine skew based on which handle was dragged (just like in Photoshop)
+      if (dragging.handleIndex === 0) { // Top-Left
+        newSkewX = Math.max(-60, Math.min(60, Math.round(prevSkewX - dx / 3)));
+      } else if (dragging.handleIndex === 1) { // Top-Right
+        newSkewX = Math.max(-60, Math.min(60, Math.round(prevSkewX + dx / 3)));
+      } else if (dragging.handleIndex === 2) { // Bottom-Left
+        newSkewY = Math.max(-60, Math.min(60, Math.round(prevSkewY + dy / 3)));
+      } else if (dragging.handleIndex === 3) { // Bottom-Right
+        newSkewY = Math.max(-60, Math.min(60, Math.round(prevSkewY - dy / 3)));
+      }
+      
+      const isCaption = dragging.elementId.startsWith('caption_');
+      const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
+      if (char && char.keyframingEnabled) {
+        const newTransform = {
+          ...dragging.origTransform,
+          skewX: newSkewX,
+          skewY: newSkewY,
+        };
+        actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
+      } else {
+        actions.setCharacterTransform(dragging.elementId, {
+          ...dragging.origTransform,
+          skewX: newSkewX,
+          skewY: newSkewY,
+        });
+      }
+    } else if (dragging.type === 'rotate3d') {
+      const dx = x - dragging.startX;
+      const dy = y - dragging.startY;
+      
+      const prevRotateX = dragging.origTransform.rotateX ?? 0;
+      const prevRotateY = dragging.origTransform.rotateY ?? 0;
+      
+      let newRotateX = prevRotateX;
+      let newRotateY = prevRotateY;
+      
+      if (dragging.lockedAxis === 'X') {
+        newRotateX = Math.max(-90, Math.min(90, Math.round(prevRotateX - dy / 2)));
+      } else if (dragging.lockedAxis === 'Y') {
+        newRotateY = Math.max(-90, Math.min(90, Math.round(prevRotateY + dx / 2)));
+      }
+      
+      const isCaption = dragging.elementId.startsWith('caption_');
+      const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
+      if (char && char.keyframingEnabled) {
+        const newTransform = {
+          ...dragging.origTransform,
+          rotateX: newRotateX,
+          rotateY: newRotateY,
+        };
+        actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
+      } else {
+        actions.setCharacterTransform(dragging.elementId, {
+          ...dragging.origTransform,
+          rotateX: newRotateX,
+          rotateY: newRotateY,
+        });
+      }
     }
   };
 
@@ -644,18 +1025,34 @@ export default function PreviewCanvas() {
     if (!state.selectedElementId) return;
     e.preventDefault();
     const isCaption = state.selectedElementId.startsWith('caption_');
-    const currentTransform = state.characterTransforms[state.selectedElementId] || {
+    const char = isCaption ? null : state.characters.find(c => c.id === state.selectedElementId);
+    
+    let currentTransform = state.characterTransforms[state.selectedElementId] || {
       x: state.canvasWidth / 2,
       y: isCaption ? state.canvasHeight * 0.85 : state.canvasHeight * 0.65,
       scale: 1,
       rotation: 0,
     };
+    
+    if (char && char.keyframingEnabled && char.keyframes?.length > 0) {
+      currentTransform = getInterpolatedKeyframeTransform(char.keyframes, state.currentTime);
+    }
+    
     const delta = e.deltaY > 0 ? -0.05 : 0.05;
     const newScale = Math.max(0.2, Math.min(3, currentTransform.scale + delta));
-    actions.setCharacterTransform(state.selectedElementId, {
-      ...currentTransform,
-      scale: newScale,
-    });
+    
+    if (char && char.keyframingEnabled) {
+      const newTransform = {
+        ...currentTransform,
+        scale: newScale,
+      };
+      actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
+    } else {
+      actions.setCharacterTransform(state.selectedElementId, {
+        ...currentTransform,
+        scale: newScale,
+      });
+    }
   };
 
   return (
@@ -663,6 +1060,49 @@ export default function PreviewCanvas() {
       <div className="panel__header">
         <span className="panel__title">Preview</span>
         <div className="panel__actions" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Transform mode toggle */}
+          <div style={{ display: 'flex', gap: 2, background: 'var(--surface-2)', padding: 1.5, borderRadius: 4, marginRight: 8 }}>
+            <button
+              onClick={() => setTransformMode('standard')}
+              style={{
+                fontSize: '9px', padding: '2px 6px', height: 20, border: 'none', borderRadius: 3,
+                background: transformMode === 'standard' ? 'var(--surface-1)' : 'transparent',
+                color: transformMode === 'standard' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                fontWeight: transformMode === 'standard' ? 'bold' : 'normal',
+                cursor: 'pointer',
+              }}
+              title="Standard Scale and Rotate transform"
+            >
+              Scale/Rotate
+            </button>
+            <button
+              onClick={() => setTransformMode('skew')}
+              style={{
+                fontSize: '9px', padding: '2px 6px', height: 20, border: 'none', borderRadius: 3,
+                background: transformMode === 'skew' ? 'var(--surface-1)' : 'transparent',
+                color: transformMode === 'skew' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                fontWeight: transformMode === 'skew' ? 'bold' : 'normal',
+                cursor: 'pointer',
+              }}
+              title="Photoshop-style Skew transform by pulling corners"
+            >
+              Skew Corners
+            </button>
+            <button
+              onClick={() => setTransformMode('rotate3d')}
+              style={{
+                fontSize: '9px', padding: '2px 6px', height: 20, border: 'none', borderRadius: 3,
+                background: transformMode === 'rotate3d' ? 'var(--surface-1)' : 'transparent',
+                color: transformMode === 'rotate3d' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                fontWeight: transformMode === 'rotate3d' ? 'bold' : 'normal',
+                cursor: 'pointer',
+              }}
+              title="Drag inside boundaries to rotate/tilt the PNG in 3D space"
+            >
+              3D Rotate
+            </button>
+          </div>
+
           {window.electronAPI && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }} title="Toggle Electron GPU Acceleration (Requires Restart)">
               <input

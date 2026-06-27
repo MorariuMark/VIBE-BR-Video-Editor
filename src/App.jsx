@@ -7,6 +7,7 @@ import PreviewCanvas from './components/PreviewCanvas';
 import ScriptEditor from './components/ScriptEditor';
 import Timeline from './components/Timeline';
 import ExportModal from './components/ExportModal';
+import ProjectSettingsModal from './components/ProjectSettingsModal';
 import ToastContainer from './components/ToastContainer';
 
 function AppContent() {
@@ -60,18 +61,18 @@ function AppContent() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
+      const activeEl = document.activeElement;
+      if (
+        activeEl &&
+        (activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          activeEl.hasAttribute('contenteditable'))
+      ) {
+        return;
+      }
+
       const isCmdOrCtrl = e.metaKey || e.ctrlKey;
       if (isCmdOrCtrl) {
-        const activeEl = document.activeElement;
-        if (
-          activeEl &&
-          (activeEl.tagName === 'INPUT' ||
-            activeEl.tagName === 'TEXTAREA' ||
-            activeEl.hasAttribute('contenteditable'))
-        ) {
-          return;
-        }
-
         if (e.key.toLowerCase() === 'z') {
           e.preventDefault();
           actions.undo();
@@ -81,12 +82,53 @@ function AppContent() {
           actions.redo();
           actions.addToast('Redo', 'info');
         }
+      } else {
+        if (e.key === ' ') {
+          e.preventDefault();
+          actions.setPlaying(!state.isPlaying);
+        } else if (e.key === 'Delete' || e.key === 'Backspace') {
+          if (state.selectedClipId) {
+            let foundTrackId = null;
+            for (const track of state.tracks) {
+              if (track.clips.some(c => c.id === state.selectedClipId)) {
+                foundTrackId = track.id;
+                break;
+              }
+            }
+            if (foundTrackId) {
+              e.preventDefault();
+              actions.removeClipFromTrack(foundTrackId, state.selectedClipId);
+              actions.selectClip(null);
+              actions.addToast('Clip deleted', 'info');
+            }
+          }
+        } else if (e.key.toLowerCase() === 's') {
+          if (state.selectedClipId) {
+            let foundTrackId = null;
+            let foundClip = null;
+            for (const track of state.tracks) {
+              const c = track.clips.find(clip => clip.id === state.selectedClipId);
+              if (c) {
+                foundTrackId = track.id;
+                foundClip = c;
+                break;
+              }
+            }
+            if (foundTrackId && foundClip) {
+              if (state.currentTime > foundClip.startTime && state.currentTime < foundClip.startTime + foundClip.duration) {
+                e.preventDefault();
+                actions.splitClip(foundTrackId, foundClip.id, state.currentTime);
+                actions.addToast('Clip split successfully', 'success');
+              }
+            }
+          }
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [actions]);
+  }, [actions, state.isPlaying, state.selectedClipId, state.tracks, state.currentTime]);
 
   useEffect(() => {
     if (window.electronAPI && window.electronAPI.onTimelineVoicesUpdated) {
@@ -97,6 +139,63 @@ function AppContent() {
         }
         if (payload.audioPath) {
           voices.push({ audioPath: payload.audioPath, characterName: 'voiceover' });
+        }
+
+        if (payload.isRedo && voices.length > 0) {
+          const { audioPath, characterName, blockId, characterId, duration, words } = voices[0];
+          const name = audioPath.split(/[\\/]/).pop();
+          
+          let dataUrl = '';
+          try {
+            const fileBuffer = await window.electronAPI.readFileBuffer(audioPath);
+            if (fileBuffer && !fileBuffer.error && fileBuffer.byteLength > 0) {
+              const arrayBuffer = new ArrayBuffer(fileBuffer.byteLength);
+              new Uint8Array(arrayBuffer).set(fileBuffer);
+              const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+              dataUrl = URL.createObjectURL(blob);
+            }
+          } catch (bufErr) {
+            console.error("Failed to read file buffer for redo:", bufErr);
+          }
+
+          const resolvedDataUrl = dataUrl || `file:///${audioPath.replace(/\\/g, '/')}`;
+
+          // Find and replace old media item in media library
+          const oldMediaItem = state.mediaItems.find(m => m.blockId === payload.redoBlockId);
+          if (oldMediaItem) {
+            actions.removeMedia(oldMediaItem.id);
+          }
+
+          const newMediaItem = {
+            id: `media_${Date.now()}_redo_${Math.random().toString(36).substr(2, 9)}`,
+            name: name,
+            path: audioPath,
+            ext: '.wav',
+            dataUrl: resolvedDataUrl,
+            type: 'audio',
+            isVoiceClone: true,
+            blockId: payload.redoBlockId,
+            characterId,
+            characterName,
+            duration: duration || 0,
+            words: words || [],
+          };
+          actions.addMedia(newMediaItem);
+
+          // Update timeline block
+          actions.updateBlockTiming(payload.redoBlockId, undefined, duration);
+          actions.updateBlock(payload.redoBlockId, { words: words || [] });
+
+          // Update timeline clip properties
+          actions.updateClipProperties(payload.redoTrackId, payload.redoClipId, {
+            name: name,
+            path: audioPath,
+            dataUrl: resolvedDataUrl,
+            duration: duration,
+          });
+
+          actions.addToast(`Redone voice line for ${characterName} applied successfully!`, 'success');
+          return;
         }
 
         if (voices.length === 0) return;
@@ -206,6 +305,7 @@ function AppContent() {
       </div>
 
       <ExportModal />
+      <ProjectSettingsModal />
       <ToastContainer />
     </div>
   );

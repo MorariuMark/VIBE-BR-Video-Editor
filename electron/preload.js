@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   applyTimelineVoices: (config) => ipcRenderer.invoke('apply-timeline-voices', config),
   onTimelineVoicesUpdated: (callback) => ipcRenderer.on('timeline-voices-updated', (event, data) => callback(data)),
   removeTimelineVoicesUpdated: () => ipcRenderer.removeAllListeners('timeline-voices-updated'),
+  onProjectStateUpdated: (callback) => ipcRenderer.on('project-state-updated', (event, data) => callback(data)),
+  removeProjectStateUpdated: () => ipcRenderer.removeAllListeners('project-state-updated'),
   saveVoicePreset: (preset) => ipcRenderer.invoke('save-voice-preset', preset),
   loadVoicePresets: () => ipcRenderer.invoke('load-voice-presets'),
   getProjectPath: () => ipcRenderer.invoke('get-project-path'),

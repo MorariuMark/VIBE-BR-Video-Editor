@@ -105,12 +105,19 @@ function createWindow() {
     frame: false,
     titleBarStyle: 'hidden',
     backgroundColor: '#0a0a0f',
+    fullscreen: false,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false,
     },
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.maximize();
+    mainWindow.show();
   });
 
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
@@ -637,7 +644,12 @@ function createVoiceCloneWindow() {
 
 // IPC Triggers
 ipcMain.on('open-voice-clone-window', () => {
-  createVoiceCloneWindow();
+  if (voiceCloneWindow) {
+    voiceCloneWindow.focus();
+    voiceCloneWindow.webContents.send('project-state-updated');
+  } else {
+    createVoiceCloneWindow();
+  }
 });
 
 let activeProjectState = null;

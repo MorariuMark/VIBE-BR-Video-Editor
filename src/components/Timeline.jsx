@@ -8,6 +8,7 @@ import { useProject } from '../store/ProjectContext';
 export default function Timeline() {
   const { state, actions } = useProject();
   const tracksContainerRef = useRef(null);
+  const playheadRef = useRef(null);
   const [draggingClip, setDraggingClip] = useState(null);
   const [resizingClip, setResizingClip] = useState(null);
   const [draggingTrackId, setDraggingTrackId] = useState(null);
@@ -28,6 +29,26 @@ export default function Timeline() {
     window.addEventListener('click', closeMenus);
     return () => window.removeEventListener('click', closeMenus);
   }, []);
+
+  // Smooth direct-DOM playhead animation loop
+  useEffect(() => {
+    if (!isPlaying) return;
+    const playhead = playheadRef.current;
+    if (!playhead) return;
+
+    const playStart = performance.now() - currentTime * 1000;
+    let animId;
+
+    const update = () => {
+      const elapsed = (performance.now() - playStart) / 1000;
+      const x = elapsed * pixelsPerSecond + trackHeaderWidth;
+      playhead.style.left = `${x}px`;
+      animId = requestAnimationFrame(update);
+    };
+
+    animId = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(animId);
+  }, [isPlaying, currentTime, pixelsPerSecond, trackHeaderWidth]);
 
   const handleDragOver = (e) => {
     e.preventDefault();
@@ -141,13 +162,25 @@ export default function Timeline() {
 
   // ─── Clip dragging ───
   const handleClipMouseDown = (e, clip, trackId) => {
+    if (trackId === 'track_captions') return;
     if (e.target.classList.contains('timeline-clip__handle')) return;
     e.stopPropagation();
     
+    const rect = e.currentTarget.parentElement.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickedTime = clickX / pixelsPerSecond;
+
+    if (state.activeTool === 'cut') {
+      if (clickedTime > clip.startTime && clickedTime < clip.startTime + clip.duration) {
+        actions.splitClip(trackId, clip.id, clickedTime);
+        actions.addToast('Clip split successfully', 'success');
+      }
+      return;
+    }
+
     actions.startDragHistory();
     actions.selectClip(clip.id);
     
-    const rect = e.currentTarget.parentElement.getBoundingClientRect();
     setDraggingClip({
       clipId: clip.id,
       trackId,
@@ -249,6 +282,7 @@ export default function Timeline() {
   }, [draggingClip, resizingClip, pixelsPerSecond]);
 
   const handleClipContextMenu = (e, clip, trackId) => {
+    if (trackId === 'track_captions') return;
     e.preventDefault();
     e.stopPropagation();
     
@@ -274,6 +308,7 @@ export default function Timeline() {
   };
 
   const handleTrackHeaderContextMenu = (e, track) => {
+    if (track.id === 'track_captions') return;
     e.preventDefault();
     e.stopPropagation();
     if (track.type !== 'character') {
@@ -362,129 +397,49 @@ export default function Timeline() {
       return;
     }
 
-    const config = state.voiceConfigs?.[block.characterId];
-    if (!config || !config.refPath || !config.refText) {
-      actions.addToast(`Voice references not set for ${block.characterName}. Open the "Voice Clone" window and generate the voiceover first to set up characters.`, "warning");
-      return;
-    }
-
-    actions.addToast(`Redoing voice line for ${block.characterName}...`, "info");
-
-    try {
-      const projectPath = window.electronAPI ? await window.electronAPI.getProjectPath() : '.';
-      const projectPathNormalized = projectPath.replace(/\\/g, '/');
-      const timestamp = Math.floor(Date.now() / 1000);
-      const voicesDir = `${projectPathNormalized}/dist/voices/redo_${timestamp}`;
-      const charName = block.characterName.replace(/[^a-zA-Z0-9_-]/g, '_');
-      const savePath = `${voicesDir}/voice_${block.id}_${charName}.wav`;
-
-      // Call Flask backend clone API directly from frontend
-      const response = await fetch('http://127.0.0.1:5555/clone', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: block.text,
-          language: 'English',
-          ref_audio: config.refPath,
-          ref_text: config.refText,
-          save_path: savePath
-        })
+    if (window.electronAPI && window.electronAPI.setActiveProjectState) {
+      actions.addToast(`Opening Voice Clone to redo line for ${block.characterName}...`, "info");
+      await window.electronAPI.setActiveProjectState({
+        characters: state.characters,
+        dialogueBlocks: state.dialogueBlocks,
+        voiceConfigs: state.voiceConfigs,
+        redoBlockId: block.id,
+        redoClipId: clip.id,
+        redoTrackId: trackId
       });
-
-      const data = await response.json();
-      if (!data.success) {
-        throw new Error(data.error || "Generation failed");
-      }
-
-      const generatedWavPath = data.wav_path;
-      const duration = data.duration;
-      const words = data.words || [];
-
-      // 1. Read buffer to create Blob URL for safe audio element playback in main window
-      let dataUrl = '';
-      if (window.electronAPI) {
-        const fileBuffer = await window.electronAPI.readFileBuffer(generatedWavPath);
-        if (fileBuffer && !fileBuffer.error && fileBuffer.byteLength > 0) {
-          const arrayBuffer = new ArrayBuffer(fileBuffer.byteLength);
-          new Uint8Array(arrayBuffer).set(fileBuffer);
-          const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
-          dataUrl = URL.createObjectURL(blob);
-        }
-      }
-      
-      const audioUrl = dataUrl || `file:///${generatedWavPath.replace(/\\/g, '/')}`;
-
-      // 2. Add as a media item to the media library so it is saved/renameable
-      const name = generatedWavPath.split(/[\\/]/).pop();
-      const mediaItem = {
-        id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: name,
-        path: generatedWavPath,
-        ext: '.wav',
-        dataUrl: audioUrl,
-        type: 'audio',
-        isVoiceClone: true,
-        blockId: block.id,
-        characterId: block.characterId,
-        characterName: block.characterName,
-        duration: duration,
-        words: words,
-      };
-      actions.addMedia(mediaItem);
-
-      // 3. Update the dialogue block duration (shifts subsequent timings automatically)
-      actions.updateBlockTiming(block.id, undefined, duration);
-      actions.updateBlock(block.id, { words: words });
-
-      // 4. Update or add corresponding clip in audio tracks
-      let audioTrack = state.tracks.find(t => t.type === 'audio');
-      if (!audioTrack) {
-        audioTrack = { id: 'track_audio_1', color: '#00e5ff' };
-      }
-
-      // Check if clip for this block already exists on any audio track
-      let existingClip = null;
-      let existingTrackId = null;
-      for (const t of state.tracks) {
-        if (t.type === 'audio') {
-          const c = t.clips.find(clip => clip.blockId === block.id);
-          if (c) {
-            existingClip = c;
-            existingTrackId = t.id;
-            break;
-          }
-        }
-      }
-
-      if (existingClip && existingTrackId) {
-        // Update existing clip properties
-        actions.updateClipProperties(existingTrackId, existingClip.id, {
-          name: name,
-          path: generatedWavPath,
-          dataUrl: audioUrl,
-          duration: duration,
-        });
-      } else {
-        // Create new audio clip on track
-        const newClip = {
-          id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          name: name,
-          startTime: block.startTime,
-          duration: duration,
-          color: audioTrack.color || '#00e5ff',
-          path: generatedWavPath,
-          dataUrl: audioUrl,
-          type: 'audio',
-          blockId: block.id,
-        };
-        actions.addClipToTrack(audioTrack.id, newClip);
-      }
-
-      actions.addToast(`Redone voice line for ${block.characterName}!`, "success");
-    } catch (err) {
-      console.error(err);
-      actions.addToast(`Failed to redo voice line: ${err.message}`, "error");
+      window.electronAPI.openVoiceCloneWindow();
+    } else {
+      actions.addToast("Voice Cloning requires the desktop Electron environment.", "warning");
     }
+  };
+
+  // Find selected clip and its track
+  let selectedClip = null;
+  let selectedClipTrack = null;
+  for (const track of tracks) {
+    const found = track.clips.find(c => c.id === state.selectedClipId);
+    if (found) {
+      selectedClip = found;
+      selectedClipTrack = track;
+      break;
+    }
+  }
+
+  const handleSplitSelectedClip = () => {
+    if (!selectedClip || !selectedClipTrack) return;
+    if (currentTime > selectedClip.startTime && currentTime < selectedClip.startTime + selectedClip.duration) {
+      actions.splitClip(selectedClipTrack.id, selectedClip.id, currentTime);
+      actions.addToast('Clip split successfully', 'success');
+    } else {
+      actions.addToast('Place the playhead inside the selected clip to split it.', 'warning');
+    }
+  };
+
+  const handleCutSelectedClip = () => {
+    if (!selectedClip || !selectedClipTrack) return;
+    actions.removeClipFromTrack(selectedClipTrack.id, selectedClip.id);
+    actions.selectClip(null);
+    actions.addToast('Clip removed', 'info');
   };
 
   const handleAddVideoTrack = () => {
@@ -562,26 +517,99 @@ export default function Timeline() {
     <div className="timeline-panel">
       {/* Timeline Toolbar */}
       <div className="timeline-toolbar">
-        <div className="toolbar__group" style={{ borderLeft: 'none' }}>
+        <div className="toolbar__group" style={{ borderLeft: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginRight: 2 }}>Select:</span>
           <button
             className={`toolbar__btn ${state.activeTool === 'select' ? 'toolbar__btn--active' : ''}`}
             onClick={() => actions.setActiveTool('select')}
             title="Selection Tool (V)"
-            style={{ height: 24, fontSize: 'var(--text-xs)' }}
+            style={{ height: 24, fontSize: 'var(--text-xs)', borderRadius: 4 }}
           >
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
-            Select
+            Select (V)
           </button>
+        </div>
+
+        <div className="toolbar__group" style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 12, borderLeft: '1px solid var(--border-subtle)', paddingLeft: 12 }}>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginRight: 2 }}>Split:</span>
           <button
             className={`toolbar__btn ${state.activeTool === 'cut' ? 'toolbar__btn--active' : ''}`}
             onClick={() => actions.setActiveTool('cut')}
-            title="Cut Tool (C)"
-            style={{ height: 24, fontSize: 'var(--text-xs)' }}
+            title="Razor Blade Tool (C) - click to split clip"
+            style={{ height: 24, fontSize: 'var(--text-xs)', borderRadius: 4 }}
           >
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
-            Cut
+            Razor Blade (C)
+          </button>
+
+          <button
+            className="toolbar__btn"
+            onClick={handleSplitSelectedClip}
+            title="Split selected clip at playhead"
+            disabled={!state.selectedClipId}
+            style={{ height: 24, fontSize: 'var(--text-xs)', borderRadius: 4, opacity: state.selectedClipId ? 1 : 0.5, cursor: state.selectedClipId ? 'pointer' : 'not-allowed' }}
+          >
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="18" x2="18" y2="18"/><path d="M16 12l4-4-4-4"/></svg>
+            Split Playhead
           </button>
         </div>
+
+        {/* Action buttons for selected clip */}
+        {state.selectedClipId && selectedClip && selectedClipTrack && (
+          <>
+            <div className="toolbar__group" style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 12, borderLeft: '1px solid var(--border-subtle)', paddingLeft: 12 }}>
+              <button
+                className="toolbar__btn"
+                onClick={handleCutSelectedClip}
+                title="Delete selected clip"
+                style={{ height: 24, fontSize: 'var(--text-xs)', color: 'var(--accent-danger)', borderRadius: 4 }}
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                Delete
+              </button>
+            </div>
+
+              {/* Speed Control */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 12, borderLeft: '1px solid var(--border-subtle)', paddingLeft: 12 }}>
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Speed:</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="4.0"
+                  style={{ width: 42, height: 18, background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', borderRadius: 3, color: 'var(--text-primary)', fontSize: '10px', padding: '0 2px' }}
+                  value={selectedClip.speed ?? 1.0}
+                  onChange={(e) => {
+                    const val = Math.max(0.1, Math.min(4.0, parseFloat(e.target.value) || 1.0));
+                    actions.updateClipProperties(selectedClipTrack.id, selectedClip.id, { speed: val });
+                  }}
+                />
+                <span style={{ fontSize: '9px', color: 'var(--text-disabled)' }}>x</span>
+              </div>
+
+              {/* Volume Control (only for tracks that support sound: audio & video) */}
+              {(selectedClipTrack.type === 'audio' || selectedClipTrack.type === 'video') && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 12 }}>
+                  <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Vol:</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1.5"
+                    step="0.05"
+                    style={{ width: 50, height: 4, accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
+                    value={selectedClip.volume ?? 1.0}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      actions.updateClipProperties(selectedClipTrack.id, selectedClip.id, { volume: val });
+                    }}
+                  />
+                  <span style={{ fontSize: '9px', color: 'var(--text-secondary)', minWidth: 24 }}>
+                    {Math.round((selectedClip.volume ?? 1.0) * 100)}%
+                  </span>
+                </div>
+              )}
+            </>
+          )}
 
         <div className="toolbar__group">
           <button
@@ -654,6 +682,7 @@ export default function Timeline() {
       >
         {/* Playhead */}
         <div
+          ref={playheadRef}
           className="timeline-playhead"
           style={{ left: `${playheadX}px` }}
         />
@@ -732,21 +761,65 @@ export default function Timeline() {
                     left: `${clip.startTime * pixelsPerSecond}px`,
                     width: `${Math.max(20, clip.duration * pixelsPerSecond)}px`,
                     background: `linear-gradient(135deg, ${clip.color}cc, ${clip.color}88)`,
+                    cursor: state.activeTool === 'cut' ? 'crosshair' : 'grab',
                   }}
                   onMouseDown={(e) => handleClipMouseDown(e, clip, track.id)}
                   onContextMenu={(e) => handleClipContextMenu(e, clip, track.id)}
                 >
-                  <div
-                    className="timeline-clip__handle timeline-clip__handle--left"
-                    onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'left')}
-                  />
+                  {track.type !== 'captions' && (
+                    <div
+                      className="timeline-clip__handle timeline-clip__handle--left"
+                      onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'left')}
+                    />
+                  )}
                   <span className="timeline-clip__label">{clip.name}</span>
-                  <div
-                    className="timeline-clip__handle timeline-clip__handle--right"
-                    onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'right')}
-                  />
+                  {track.type !== 'captions' && (
+                    <div
+                      className="timeline-clip__handle timeline-clip__handle--right"
+                      onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'right')}
+                    />
+                  )}
                 </div>
               ))}
+
+              {/* Rhombus Keyframe markers on the track row */}
+              {track.type === 'character' && (() => {
+                const char = state.characters.find(c => c.id === track.characterId);
+                if (char && char.keyframingEnabled && char.keyframes) {
+                  return char.keyframes.map((kf, kfIdx) => {
+                    const leftPos = kf.time * pixelsPerSecond;
+                    const isSelected = state.selectedKeyframeIndex === kfIdx && state.selectedElementId === char.id;
+                    return (
+                      <div
+                        key={kfIdx}
+                        className="timeline-keyframe-marker"
+                        style={{
+                          position: 'absolute',
+                          left: `${leftPos}px`,
+                          top: '50%',
+                          transform: 'translate(-50%, -50%) rotate(45deg)',
+                          width: 11,
+                          height: 11,
+                          backgroundColor: isSelected ? '#ff4081' : '#ffffff',
+                          border: `2px solid ${isSelected ? '#ffffff' : 'var(--accent-primary)'}`,
+                          zIndex: 10,
+                          cursor: 'pointer',
+                          pointerEvents: 'auto',
+                          boxShadow: '0 0 6px rgba(0,0,0,0.8)',
+                        }}
+                        title={`Keyframe at ${kf.time}s`}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          actions.selectElement(char.id);
+                          actions.selectKeyframe(kfIdx);
+                          actions.setCurrentTime(kf.time);
+                        }}
+                      />
+                    );
+                  });
+                }
+                return null;
+              })()}
             </div>
           </div>
         ))}

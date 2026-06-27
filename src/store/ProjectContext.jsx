@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, useCallback } from 'react';
-import { parseScript, recalculateTimings, addCustomCharacter, DEFAULT_TEXT_STYLE } from '../engine/scriptParser';
+import { parseScript, recalculateTimings, addCustomCharacter, DEFAULT_TEXT_STYLE, estimateDialogueDuration } from '../engine/scriptParser';
 
 const ProjectContext = createContext(null);
 
@@ -31,6 +31,7 @@ const initialState = {
   canvasWidth: 1080,
   canvasHeight: 1920,
   selectedElementId: null,
+  selectedKeyframeIndex: null,
   
   // Audio
   audioFile: null, // { name, path, dataUrl, duration }
@@ -42,6 +43,7 @@ const initialState = {
   // Export
   isExporting: false,
   exportProgress: 0,
+  showProjectSettingsModal: false,
   exportSettings: {
     width: 1080,
     height: 1920,
@@ -95,10 +97,14 @@ const ActionTypes = {
   
   SET_CHARACTER_TRANSFORM: 'SET_CHARACTER_TRANSFORM',
   SELECT_ELEMENT: 'SELECT_ELEMENT',
+  SELECT_KEYFRAME: 'SELECT_KEYFRAME',
   
   SET_ACTIVE_TOOL: 'SET_ACTIVE_TOOL',
   SET_ACTIVE_PANEL: 'SET_ACTIVE_PANEL',
   SET_SHOW_EXPORT_MODAL: 'SET_SHOW_EXPORT_MODAL',
+  SET_SHOW_PROJECT_SETTINGS_MODAL: 'SET_SHOW_PROJECT_SETTINGS_MODAL',
+  SET_PROJECT_RESOLUTION: 'SET_PROJECT_RESOLUTION',
+  SPLIT_CLIP: 'SPLIT_CLIP',
   SET_EXPORT_SETTINGS: 'SET_EXPORT_SETTINGS',
   SET_EXPORTING: 'SET_EXPORTING',
   SET_EXPORT_PROGRESS: 'SET_EXPORT_PROGRESS',
@@ -124,6 +130,12 @@ const ActionTypes = {
   START_DRAG_HISTORY: 'START_DRAG_HISTORY',
   END_DRAG_HISTORY: 'END_DRAG_HISTORY',
   BATCH_APPLY_VOICES: 'BATCH_APPLY_VOICES',
+  TOGGLE_CHARACTER_KEYFRAMING: 'TOGGLE_CHARACTER_KEYFRAMING',
+  ADD_KEYFRAME: 'ADD_KEYFRAME',
+  REMOVE_KEYFRAME: 'REMOVE_KEYFRAME',
+  UPDATE_KEYFRAME: 'UPDATE_KEYFRAME',
+  REMOVE_ALL_VOICES_FROM_TIMELINE: 'REMOVE_ALL_VOICES_FROM_TIMELINE',
+  DELETE_ALL_VOICES_FROM_LIBRARY: 'DELETE_ALL_VOICES_FROM_LIBRARY',
 };
 
 // ─── Helpers ───
@@ -442,7 +454,10 @@ function coreProjectReducer(state, action) {
     }
     
     case ActionTypes.SELECT_ELEMENT:
-      return { ...state, selectedElementId: action.payload };
+      return { ...state, selectedElementId: action.payload, selectedKeyframeIndex: null };
+    
+    case ActionTypes.SELECT_KEYFRAME:
+      return { ...state, selectedKeyframeIndex: action.payload };
     
     case ActionTypes.SET_ACTIVE_TOOL:
       return { ...state, activeTool: action.payload };
@@ -452,6 +467,127 @@ function coreProjectReducer(state, action) {
     
     case ActionTypes.SET_SHOW_EXPORT_MODAL:
       return { ...state, showExportModal: action.payload };
+
+    case ActionTypes.SET_SHOW_PROJECT_SETTINGS_MODAL:
+      return { ...state, showProjectSettingsModal: action.payload };
+
+    case ActionTypes.SET_PROJECT_RESOLUTION: {
+      const { width, height } = action.payload;
+      return {
+        ...state,
+        canvasWidth: width,
+        canvasHeight: height,
+        exportSettings: {
+          ...state.exportSettings,
+          width,
+          height,
+        }
+      };
+    }
+
+    case ActionTypes.SPLIT_CLIP: {
+      const { trackId, clipId, splitTime } = action.payload;
+      
+      const track = state.tracks.find(t => t.id === trackId);
+      if (!track) return state;
+      
+      const clip = track.clips.find(c => c.id === clipId);
+      if (!clip) return state;
+      
+      if (splitTime <= clip.startTime || splitTime >= clip.startTime + clip.duration) {
+        return state;
+      }
+      
+      // CASE A: Character presence track (split the actual underlying dialogue block)
+      if (track.type === 'character') {
+        const block = state.dialogueBlocks.find(b => b.id === clipId);
+        if (!block) return state;
+        
+        const duration1 = splitTime - block.startTime;
+        const duration2 = block.startTime + block.duration - splitTime;
+        
+        let text1 = '', text2 = '';
+        let words1 = undefined, words2 = undefined;
+        
+        if (block.words && block.words.length > 0) {
+          const splitOffset = splitTime - block.startTime;
+          words1 = block.words.filter(w => w.start < splitOffset);
+          words2 = block.words.filter(w => w.start >= splitOffset).map(w => ({
+            ...w,
+            start: w.start - splitOffset,
+            end: w.end - splitOffset,
+          }));
+          text1 = words1.map(w => w.word).join(' ');
+          text2 = words2.map(w => w.word).join(' ');
+        } else {
+          const ratio = (splitTime - block.startTime) / block.duration;
+          const splitIdx = Math.round(block.text.length * ratio);
+          text1 = block.text.substring(0, splitIdx).trim();
+          text2 = block.text.substring(splitIdx).trim();
+        }
+        
+        const block1 = {
+          ...block,
+          duration: duration1,
+          text: text1 || '...',
+          words: words1,
+        };
+        
+        const block2 = {
+          ...block,
+          id: `block_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          startTime: splitTime,
+          duration: duration2,
+          text: text2 || '...',
+          words: words2,
+        };
+        
+        const blockIdx = state.dialogueBlocks.findIndex(b => b.id === block.id);
+        const newDialogueBlocks = [...state.dialogueBlocks];
+        newDialogueBlocks[blockIdx] = block1;
+        newDialogueBlocks.splice(blockIdx + 1, 0, block2);
+        
+        const tracks = generateTracksFromBlocks(newDialogueBlocks, state.characters, { ...state, dialogueBlocks: newDialogueBlocks });
+        return {
+          ...state,
+          dialogueBlocks: newDialogueBlocks,
+          tracks,
+        };
+      }
+      
+      // CASE B: User media track (video / audio)
+      const duration1 = splitTime - clip.startTime;
+      const duration2 = clip.startTime + clip.duration - splitTime;
+      
+      const clip1 = {
+        ...clip,
+        duration: duration1,
+        blockId: null, // Clear blockId so it behaves as an independent clip
+      };
+      
+      const clip2 = {
+        ...clip,
+        id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        startTime: splitTime,
+        duration: duration2,
+        blockId: null, // Clear blockId so it behaves as an independent clip
+      };
+      
+      const tracks = state.tracks.map(t => {
+        if (t.id !== trackId) return t;
+        const restClips = t.clips.filter(c => c.id !== clipId);
+        const newClips = [...restClips, clip1, clip2].sort((a, b) => a.startTime - b.startTime);
+        return {
+          ...t,
+          clips: newClips,
+        };
+      });
+      
+      return {
+        ...state,
+        tracks,
+      };
+    }
     
     case ActionTypes.SET_EXPORT_SETTINGS:
       return { ...state, exportSettings: { ...state.exportSettings, ...action.payload } };
@@ -549,7 +685,136 @@ function coreProjectReducer(state, action) {
         totalDuration,
       };
     }
-    
+
+    case ActionTypes.TOGGLE_CHARACTER_KEYFRAMING: {
+      const { characterId, enabled } = action.payload;
+      const characters = state.characters.map(c => {
+        if (c.id === characterId) {
+          const keyframes = [...(c.keyframes || [])];
+          if (enabled && keyframes.length === 0) {
+            const defTrans = state.characterTransforms[characterId] || {
+              x: state.canvasWidth / 2,
+              y: state.canvasHeight * 0.65,
+              scale: 1,
+              rotation: 0,
+              opacity: 1,
+            };
+            keyframes.push({
+              time: 0,
+              x: defTrans.x,
+              y: defTrans.y,
+              scale: defTrans.scale,
+              rotation: defTrans.rotation ?? 0,
+              opacity: defTrans.opacity ?? 1,
+            });
+          }
+          return { ...c, keyframingEnabled: enabled, keyframes };
+        }
+        return c;
+      });
+      return { ...state, characters };
+    }
+
+    case ActionTypes.ADD_KEYFRAME: {
+      const { characterId, time, transform } = action.payload;
+      const characters = state.characters.map(c => {
+        if (c.id === characterId) {
+          const keyframes = [...(c.keyframes || [])];
+          const existingIdx = keyframes.findIndex(kf => Math.abs(kf.time - time) < 0.05);
+          const newKf = {
+            time: Number(time.toFixed(2)),
+            x: transform.x,
+            y: transform.y,
+            scale: transform.scale,
+            rotation: transform.rotation ?? 0,
+            opacity: transform.opacity ?? 1,
+          };
+          if (existingIdx !== -1) {
+            keyframes[existingIdx] = newKf;
+          } else {
+            keyframes.push(newKf);
+            keyframes.sort((a, b) => a.time - b.time);
+          }
+          return { ...c, keyframes };
+        }
+        return c;
+      });
+      return { ...state, characters };
+    }
+
+    case ActionTypes.REMOVE_KEYFRAME: {
+      const { characterId, index } = action.payload;
+      const characters = state.characters.map(c => {
+        if (c.id === characterId) {
+          const keyframes = (c.keyframes || []).filter((_, idx) => idx !== index);
+          return { ...c, keyframes };
+        }
+        return c;
+      });
+      return { ...state, characters };
+    }
+
+    case ActionTypes.UPDATE_KEYFRAME: {
+      const { characterId, index, keyframeData } = action.payload;
+      const characters = state.characters.map(c => {
+        if (c.id === characterId) {
+          const keyframes = [...(c.keyframes || [])];
+          if (keyframes[index]) {
+            keyframes[index] = { ...keyframes[index], ...keyframeData };
+            keyframes.sort((a, b) => a.time - b.time);
+          }
+          return { ...c, keyframes };
+        }
+        return c;
+      });
+      return { ...state, characters };
+    }
+
+    case ActionTypes.REMOVE_ALL_VOICES_FROM_TIMELINE: {
+      let blocks = state.dialogueBlocks.map(block => {
+        const estimatedDur = estimateDialogueDuration(block.text);
+        return {
+          ...block,
+          duration: estimatedDur,
+          words: [],
+        };
+      });
+
+      // Recalculate block timings
+      for (let i = 0; i < blocks.length; i++) {
+        blocks = recalculateTimings(blocks, i);
+      }
+
+      // Filter out all clips with blockId (representing voice clips) from audio tracks
+      let tracks = state.tracks.map(track => {
+        if (track.type === 'audio') {
+          return {
+            ...track,
+            clips: track.clips.filter(clip => !clip.blockId),
+          };
+        }
+        return track;
+      });
+
+      const totalDuration = recalculateTotalDuration(blocks);
+      tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration, tracks });
+
+      return {
+        ...state,
+        dialogueBlocks: blocks,
+        tracks,
+        totalDuration,
+      };
+    }
+
+    case ActionTypes.DELETE_ALL_VOICES_FROM_LIBRARY: {
+      const mediaItems = state.mediaItems.filter(item => !item.isVoiceClone);
+      return {
+        ...state,
+        mediaItems,
+      };
+    }
+
     default:
       return state;
   }
@@ -795,8 +1060,35 @@ function generateTracksFromBlocks(blocks, characters, state) {
     });
   }
 
+  // Generate/sync Captions track
+  let captionsTrack = (state.tracks || []).find(t => t.id === 'track_captions');
+  if (!captionsTrack) {
+    captionsTrack = {
+      id: 'track_captions',
+      name: 'Captions',
+      type: 'captions',
+      color: '#ffd21e',
+      clips: [{
+        id: 'clip_captions',
+        name: 'Caption Layer (Reorder in timeline)',
+        startTime: 0,
+        duration: state.totalDuration || 30,
+        color: '#ffd21e',
+        type: 'captions',
+      }]
+    };
+  } else {
+    captionsTrack = {
+      ...captionsTrack,
+      clips: [{
+        ...captionsTrack.clips[0],
+        duration: state.totalDuration || 30,
+      }]
+    };
+  }
+
   // Combined tracks
-  const combined = [...charTracks, ...syncedUserTracks];
+  const combined = [captionsTrack, ...charTracks, ...syncedUserTracks];
   
   // Sort tracks by existing order if available
   if (state.tracks && state.tracks.length > 0) {
@@ -907,6 +1199,10 @@ export function ProjectProvider({ children }) {
     selectElement: useCallback((id) => {
       dispatch({ type: ActionTypes.SELECT_ELEMENT, payload: id });
     }, []),
+
+    selectKeyframe: useCallback((index) => {
+      dispatch({ type: ActionTypes.SELECT_KEYFRAME, payload: index });
+    }, []),
     
     setActiveTool: useCallback((tool) => {
       dispatch({ type: ActionTypes.SET_ACTIVE_TOOL, payload: tool });
@@ -918,6 +1214,18 @@ export function ProjectProvider({ children }) {
     
     setShowExportModal: useCallback((show) => {
       dispatch({ type: ActionTypes.SET_SHOW_EXPORT_MODAL, payload: show });
+    }, []),
+
+    setShowProjectSettingsModal: useCallback((show) => {
+      dispatch({ type: ActionTypes.SET_SHOW_PROJECT_SETTINGS_MODAL, payload: show });
+    }, []),
+
+    setProjectResolution: useCallback((width, height) => {
+      dispatch({ type: ActionTypes.SET_PROJECT_RESOLUTION, payload: { width, height } });
+    }, []),
+
+    splitClip: useCallback((trackId, clipId, splitTime) => {
+      dispatch({ type: ActionTypes.SPLIT_CLIP, payload: { trackId, clipId, splitTime } });
     }, []),
     
     setExportSettings: useCallback((settings) => {
@@ -1002,6 +1310,34 @@ export function ProjectProvider({ children }) {
 
     applyVoices: useCallback((items) => {
       dispatch({ type: ActionTypes.BATCH_APPLY_VOICES, payload: items });
+    }, []),
+
+    setTracks: useCallback((tracks) => {
+      dispatch({ type: ActionTypes.SET_TRACKS, payload: tracks });
+    }, []),
+
+    toggleCharacterKeyframing: useCallback((characterId, enabled) => {
+      dispatch({ type: ActionTypes.TOGGLE_CHARACTER_KEYFRAMING, payload: { characterId, enabled } });
+    }, []),
+
+    addCharacterKeyframe: useCallback((characterId, time, transform) => {
+      dispatch({ type: ActionTypes.ADD_KEYFRAME, payload: { characterId, time, transform } });
+    }, []),
+
+    removeCharacterKeyframe: useCallback((characterId, index) => {
+      dispatch({ type: ActionTypes.REMOVE_KEYFRAME, payload: { characterId, index } });
+    }, []),
+
+    updateCharacterKeyframe: useCallback((characterId, index, keyframeData) => {
+      dispatch({ type: ActionTypes.UPDATE_KEYFRAME, payload: { characterId, index, keyframeData } });
+    }, []),
+
+    removeAllVoicesFromTimeline: useCallback(() => {
+      dispatch({ type: ActionTypes.REMOVE_ALL_VOICES_FROM_TIMELINE });
+    }, []),
+
+    deleteAllVoiceClipsFromLibrary: useCallback(() => {
+      dispatch({ type: ActionTypes.DELETE_ALL_VOICES_FROM_LIBRARY });
     }, []),
   };
 
