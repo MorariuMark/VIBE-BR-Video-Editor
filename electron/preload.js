@@ -47,5 +47,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   copyFile: (src, dest) => ipcRenderer.invoke('copy-file', { src, dest }),
   mixAudioClips: (config) => ipcRenderer.invoke('mix-audio-clips', config),
   deleteFile: (filePath) => ipcRenderer.invoke('delete-file', filePath),
+
+  // Settings Window
+  openSettingsWindow: () => ipcRenderer.send('open-settings-window'),
+  setActiveSettingsState: (state) => ipcRenderer.invoke('set-active-settings-state', state),
+  getActiveSettingsState: () => ipcRenderer.invoke('get-active-settings-state'),
+  applyProjectSettings: (config) => ipcRenderer.invoke('apply-project-settings', config),
+  onProjectSettingsUpdated: (callback) => ipcRenderer.on('project-settings-updated', (event, data) => callback(data)),
+  removeProjectSettingsUpdated: () => ipcRenderer.removeAllListeners('project-settings-updated'),
 });
 

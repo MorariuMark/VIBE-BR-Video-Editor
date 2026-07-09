@@ -248,6 +248,106 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, width, height);
         }
       }
+    } else if (track.type === 'broll') {
+      if (state.brollLayout === 'none') return;
+      const activeClip = track.clips.find(clip => time >= clip.startTime && time < clip.startTime + clip.duration);
+      if (!activeClip) return;
+
+      let drawX = 0, drawY = 0, drawW = width, drawH = height;
+      let isPip = false;
+
+      if (state.brollLayout === 'split') {
+        drawX = 0;
+        drawY = 0;
+        drawW = width;
+        drawH = height * 0.45;
+      } else if (state.brollLayout === 'pip') {
+        drawW = width * 0.8;
+        drawH = height * 0.25;
+        drawX = (width - drawW) / 2;
+        drawY = height * 0.06;
+        isPip = true;
+      }
+
+      ctx.save();
+
+      if (isPip) {
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(drawX, drawY, drawW, drawH, 12 * scaleFactor);
+        } else {
+          ctx.rect(drawX, drawY, drawW, drawH);
+        }
+        ctx.clip();
+      }
+
+      if (activeClip.type === 'video') {
+        const v = (videoElement && videoElement[activeClip.id]) || 
+                  (activeClip.id === 'clip_bg' && videoElement instanceof HTMLVideoElement ? videoElement : null);
+        if (v && v.readyState >= 2) {
+          const regionRatio = drawW / drawH;
+          const videoRatio = v.videoWidth / v.videoHeight || (state.canvasWidth / state.canvasHeight);
+          
+          let sx = 0, sy = 0, sw = v.videoWidth, sh = v.videoHeight;
+          if (videoRatio > regionRatio) {
+            sw = sh * regionRatio;
+            sx = (v.videoWidth - sw) / 2;
+          } else {
+            sh = sw / regionRatio;
+            sy = (v.videoHeight - sh) / 2;
+          }
+          try {
+            ctx.drawImage(v, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
+          } catch (e) {
+            ctx.drawImage(v, drawX, drawY, drawW, drawH);
+          }
+        }
+      } else if (activeClip.type === 'image') {
+        const img = loadedImages[activeClip.id];
+        if (img) {
+          const regionRatio = drawW / drawH;
+          const imgRatio = img.width / img.height || (state.canvasWidth / state.canvasHeight);
+          
+          let sx = 0, sy = 0, sw = img.width, sh = img.height;
+          if (imgRatio > regionRatio) {
+            sw = sh * regionRatio;
+            sx = (img.width - sw) / 2;
+          } else {
+            sh = sw / regionRatio;
+            sy = (img.height - sh) / 2;
+          }
+          ctx.drawImage(img, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
+        }
+      }
+
+      ctx.restore();
+
+      if (isPip) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.lineWidth = 3 * scaleFactor;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowBlur = 12 * scaleFactor;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 4 * scaleFactor;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(drawX, drawY, drawW, drawH, 12 * scaleFactor);
+        } else {
+          ctx.rect(drawX, drawY, drawW, drawH);
+        }
+        ctx.stroke();
+        ctx.restore();
+      } else if (state.brollLayout === 'split') {
+        ctx.save();
+        ctx.strokeStyle = '#ffd21e';
+        ctx.lineWidth = 4 * scaleFactor;
+        ctx.beginPath();
+        ctx.moveTo(0, height * 0.45);
+        ctx.lineTo(width, height * 0.45);
+        ctx.stroke();
+        ctx.restore();
+      }
     } else if (track.type === 'character') {
       const charId = track.characterId;
       const char = state.characters.find(c => c.id === charId);

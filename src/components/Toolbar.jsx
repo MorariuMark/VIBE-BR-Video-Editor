@@ -151,12 +151,101 @@ export default function Toolbar() {
     }
   };
 
+  const [showHistory, setShowHistory] = React.useState(false);
+  const historyRef = React.useRef(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (historyRef.current && !historyRef.current.contains(e.target)) {
+        setShowHistory(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSettingsOpen = async () => {
+    if (window.electronAPI && window.electronAPI.setActiveSettingsState) {
+      await window.electronAPI.setActiveSettingsState({
+        canvasWidth: state.canvasWidth,
+        canvasHeight: state.canvasHeight,
+        fps: state.exportSettings?.fps || 60,
+        brollLayout: state.brollLayout || 'none',
+      });
+      window.electronAPI.openSettingsWindow();
+    } else {
+      actions.setShowProjectSettingsModal(true);
+    }
+  };
+
+  const renderHistoryDropdown = () => {
+    const { past = [], future = [] } = state.history || {};
+    const currentLabel = state.lastActionLabel || 'Open Project';
+
+    const items = [
+      ...past.map((p, idx) => ({ label: p.lastActionLabel || 'Action', active: false, index: idx })),
+      { label: currentLabel, active: true, index: past.length },
+      ...future.map((f, idx) => ({ label: f.lastActionLabel || 'Action', active: false, index: past.length + 1 + idx, isFuture: true }))
+    ];
+
+    return (
+      <div style={{
+        position: 'absolute',
+        top: 'calc(100% + 4px)',
+        left: 0,
+        background: 'var(--surface-1, #0f0f15)',
+        border: '1px solid var(--border-default, rgba(255,255,255,0.08))',
+        borderRadius: '6px',
+        padding: '6px 0',
+        minWidth: '200px',
+        maxWidth: '300px',
+        maxHeight: '300px',
+        overflowY: 'auto',
+        zIndex: 1000,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+      }}>
+        <div style={{ padding: '4px 12px 6px', fontSize: '11px', fontWeight: 'bold', color: 'var(--text-disabled)', borderBottom: '1px solid var(--border-subtle)', marginBottom: '4px' }}>
+          Modification History
+        </div>
+        {items.map((item) => (
+          <div
+            key={item.index}
+            style={{
+              padding: '6px 12px',
+              fontSize: '12px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: item.active ? 'var(--accent-primary-glow, rgba(124, 77, 255, 0.2))' : 'transparent',
+              color: item.active ? 'var(--accent-primary, #00e5ff)' : (item.isFuture ? 'var(--text-disabled, rgba(255,255,255,0.35))' : 'var(--text-primary, #fff)'),
+              borderLeft: item.active ? '3px solid var(--accent-primary, #00e5ff)' : '3px solid transparent',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover, rgba(255,255,255,0.05))'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = item.active ? 'var(--accent-primary-glow, rgba(124, 77, 255, 0.2))' : 'transparent'; }}
+            onClick={() => {
+              actions.jumpToHistoryState(item.index);
+              actions.addToast(`Reverted to: ${item.label}`, 'info');
+              setShowHistory(false);
+            }}
+          >
+            <span style={{ opacity: item.isFuture ? 0.5 : 1 }}>{item.label}</span>
+            {item.active && (
+              <span style={{ fontSize: '10px', color: 'var(--accent-primary)', fontWeight: 'bold' }}>Active</span>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="toolbar">
       <div className="toolbar__group">
         <button
           className="toolbar__btn"
-          onClick={() => actions.setShowProjectSettingsModal(true)}
+          onClick={handleSettingsOpen}
           title="Project Settings"
         >
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -190,6 +279,18 @@ export default function Toolbar() {
       </div>
 
       <div className="toolbar__spacer" />
+
+      <div className="toolbar__group" style={{ position: 'relative' }} ref={historyRef}>
+        <button
+          className={`toolbar__btn ${showHistory ? 'toolbar__btn--active' : ''}`}
+          onClick={() => setShowHistory(!showHistory)}
+          title="Action History (Photoshop Style)"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><polyline points="3 3 3 8 8 8"/><line x1="12" y1="7" x2="12" y2="12"/><line x1="12" y1="12" x2="16" y2="14"/></svg>
+          History
+        </button>
+        {showHistory && renderHistoryDropdown()}
+      </div>
 
       <div className="toolbar__group">
         <button

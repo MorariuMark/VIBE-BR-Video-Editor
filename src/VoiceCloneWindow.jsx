@@ -930,11 +930,11 @@ export default function VoiceCloneWindow() {
         .right-panel {
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 6px;
           background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
           border: 1px solid var(--border-default, rgba(255, 255, 255, 0.04));
           border-radius: var(--radius-md, 8px);
-          padding: 12px;
+          padding: 8px;
           min-height: 0;
           min-width: 0;
           overflow: hidden;
@@ -1052,7 +1052,7 @@ export default function VoiceCloneWindow() {
           margin: 0;
           overflow-y: auto;
           flex: 1;
-          min-height: 120px;
+          min-height: 80px;
         }
 
         .script-item {
@@ -1423,9 +1423,9 @@ export default function VoiceCloneWindow() {
           <div style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: 12,
-            marginTop: 4,
-            padding: 12,
+            gap: 8,
+            marginTop: 2,
+            padding: 8,
             background: 'var(--bg-primary, #0f0f15)',
             border: '1px solid var(--border-strong, rgba(255, 255, 255, 0.08))',
             borderRadius: '6px'
@@ -1504,8 +1504,8 @@ export default function VoiceCloneWindow() {
           </div>
 
           {/* Script sequence list */}
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-            <h4 style={{ fontSize: '12px', margin: '12px 0 6px', color: '#a0a0b0' }}>Script Order Preview</h4>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+            <h4 style={{ fontSize: '12px', margin: '6px 0 4px', color: '#a0a0b0' }}>Script Order Preview</h4>
             <div className="script-preview">
               {dialogueBlocks.map((block, idx) => {
                 const genBlock = generatedResult?.dialogueBlocks?.find(b => b.id === block.id);
@@ -1576,7 +1576,7 @@ export default function VoiceCloneWindow() {
           )}
 
           {/* System Logs */}
-          <div style={{ display: 'flex', flexDirection: 'column', height: '70px', minHeight: '70px', maxHeight: '70px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', height: '50px', minHeight: '50px', maxHeight: '50px', flexShrink: 0 }}>
             <span style={{ fontSize: '11px', color: '#a0a0b0', marginBottom: 2 }}>Operations Log</span>
             <div className="logs-container">
               {genLogs.length === 0 ? (

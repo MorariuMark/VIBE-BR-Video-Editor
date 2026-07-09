@@ -53,7 +53,7 @@ function HoverMenuItem({ text, onClick, color }) {
 /**
  * Media Library Panel - holds imported video clips, character PNGs, and audio
  */
-export default function MediaLibrary() {
+export default function MediaLibrary({ onMinimize }) {
   const { state, actions, dispatch } = useProject();
   const [activeTab, setActiveTab] = useState('all');
   const [optimizing, setOptimizing] = useState({});
@@ -377,16 +377,45 @@ export default function MediaLibrary() {
         </div>
       </div>
 
-      <div className="media-tabs">
-        {tabs.map(tab => (
+      <div className="media-tabs" style={{ display: 'flex', alignItems: 'center', paddingRight: '8px' }}>
+        <div style={{ display: 'flex', gap: 'var(--sp-1)', flex: 1 }}>
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              className={`media-tab ${activeTab === tab.id ? 'media-tab--active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+              style={{ flex: 1 }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {onMinimize && (
           <button
-            key={tab.id}
-            className={`media-tab ${activeTab === tab.id ? 'media-tab--active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={onMinimize}
+            className="media-tab"
+            style={{
+              flex: 'none',
+              width: 24,
+              height: 24,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginLeft: 4,
+              color: 'var(--text-tertiary)',
+              borderRadius: 'var(--radius-sm)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.15s'
+            }}
+            title="Minimize Media Library"
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-primary)'; e.currentTarget.style.background = 'var(--bg-hover)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-tertiary)'; e.currentTarget.style.background = 'none'; }}
           >
-            {tab.label}
+            ◀
           </button>
-        ))}
+        )}
       </div>
 
       <div className="panel__body">

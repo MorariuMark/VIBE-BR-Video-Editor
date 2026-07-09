@@ -7,7 +7,6 @@ import PreviewCanvas from './components/PreviewCanvas';
 import ScriptEditor from './components/ScriptEditor';
 import Timeline from './components/Timeline';
 import ExportModal from './components/ExportModal';
-import ProjectSettingsModal from './components/ProjectSettingsModal';
 import ToastContainer from './components/ToastContainer';
 
 function AppContent() {
@@ -15,6 +14,10 @@ function AppContent() {
   const [leftWidth, setLeftWidth] = useState(280);
   const [rightWidth, setRightWidth] = useState(380);
   const [timelineHeight, setTimelineHeight] = useState(260);
+  const [leftMinimized, setLeftMinimized] = useState(false);
+  const [rightMinimized, setRightMinimized] = useState(false);
+  const [savedLeftWidth, setSavedLeftWidth] = useState(280);
+  const [savedRightWidth, setSavedRightWidth] = useState(380);
   const resizingRef = useRef(null);
 
   // ─── Panel Resizing ───
@@ -244,13 +247,28 @@ function AppContent() {
 
         actions.addToast(`All ${voices.length} voiceover clips added to Media Library!`, 'success');
       });
-
-      return () => {
-        if (window.electronAPI.removeTimelineVoicesUpdated) {
-          window.electronAPI.removeTimelineVoicesUpdated();
-        }
-      };
     }
+
+    if (window.electronAPI && window.electronAPI.onProjectSettingsUpdated) {
+      window.electronAPI.onProjectSettingsUpdated((payload) => {
+        const { width, height, fps, brollLayout } = payload;
+        actions.setProjectResolution(width, height);
+        actions.setExportSettings({ fps });
+        if (brollLayout) {
+          actions.setBrollLayout(brollLayout);
+        }
+        actions.addToast('Project settings updated', 'success');
+      });
+    }
+
+    return () => {
+      if (window.electronAPI && window.electronAPI.removeTimelineVoicesUpdated) {
+        window.electronAPI.removeTimelineVoicesUpdated();
+      }
+      if (window.electronAPI && window.electronAPI.removeProjectSettingsUpdated) {
+        window.electronAPI.removeProjectSettingsUpdated();
+      }
+    };
   }, [actions]);
 
   return (
@@ -264,15 +282,63 @@ function AppContent() {
           {/* ── Upper Area: Library | Preview | Script ── */}
           <div className="workspace" style={{ flex: 1, minHeight: 0 }}>
             {/* Left Panel - Media Library */}
-            <div className="workspace__left" style={{ width: leftWidth }}>
-              <MediaLibrary />
-            </div>
+            {leftMinimized ? (
+              <div
+                onClick={() => {
+                  setLeftWidth(savedLeftWidth);
+                  setLeftMinimized(false);
+                }}
+                style={{
+                  width: 32,
+                  height: '100%',
+                  background: 'var(--surface-1)',
+                  borderRight: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  paddingTop: 16,
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  transition: 'background 0.15s',
+                  position: 'relative'
+                }}
+                title="Expand Media Library"
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--surface-1)'; }}
+              >
+                <div style={{ fontSize: '10px', color: 'var(--accent-primary)', marginBottom: 24, fontWeight: 'bold' }}>
+                  ▶▶
+                </div>
+                <div style={{
+                  writingMode: 'vertical-rl',
+                  textTransform: 'uppercase',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  letterSpacing: '2px',
+                  color: 'var(--text-secondary)'
+                }}>
+                  Media Library
+                </div>
+              </div>
+            ) : (
+              <div className="workspace__left" style={{ width: leftWidth, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+                <MediaLibrary
+                  onMinimize={() => {
+                    setSavedLeftWidth(leftWidth);
+                    setLeftWidth(0);
+                    setLeftMinimized(true);
+                  }}
+                />
+              </div>
+            )}
 
             {/* Left Resizer */}
-            <div
-              className="resizer resizer--h"
-              onMouseDown={(e) => handleResizeStart(e, 'left')}
-            />
+            {!leftMinimized && (
+              <div
+                className="resizer resizer--h"
+                onMouseDown={(e) => handleResizeStart(e, 'left')}
+              />
+            )}
 
             {/* Center - Preview Canvas */}
             <div className="workspace__center">
@@ -280,15 +346,63 @@ function AppContent() {
             </div>
 
             {/* Right Resizer */}
-            <div
-              className="resizer resizer--h"
-              onMouseDown={(e) => handleResizeStart(e, 'right')}
-            />
+            {!rightMinimized && (
+              <div
+                className="resizer resizer--h"
+                onMouseDown={(e) => handleResizeStart(e, 'right')}
+              />
+            )}
 
             {/* Right Panel - Script Editor */}
-            <div className="workspace__right" style={{ width: rightWidth }}>
-              <ScriptEditor />
-            </div>
+            {rightMinimized ? (
+              <div
+                onClick={() => {
+                  setRightWidth(savedRightWidth);
+                  setRightMinimized(false);
+                }}
+                style={{
+                  width: 32,
+                  height: '100%',
+                  background: 'var(--surface-1)',
+                  borderLeft: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  paddingTop: 16,
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  transition: 'background 0.15s',
+                  position: 'relative'
+                }}
+                title="Expand Script Editor"
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--surface-1)'; }}
+              >
+                <div style={{ fontSize: '10px', color: 'var(--accent-primary)', marginBottom: 24, fontWeight: 'bold' }}>
+                  ◀◀
+                </div>
+                <div style={{
+                  writingMode: 'vertical-rl',
+                  textTransform: 'uppercase',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  letterSpacing: '2px',
+                  color: 'var(--text-secondary)'
+                }}>
+                  Script Editor
+                </div>
+              </div>
+            ) : (
+              <div className="workspace__right" style={{ width: rightWidth, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+                <ScriptEditor
+                  onMinimize={() => {
+                    setSavedRightWidth(rightWidth);
+                    setRightWidth(0);
+                    setRightMinimized(true);
+                  }}
+                />
+              </div>
+            )}
           </div>
 
           {/* ── Timeline Resizer ── */}
@@ -305,7 +419,6 @@ function AppContent() {
       </div>
 
       <ExportModal />
-      <ProjectSettingsModal />
       <ToastContainer />
     </div>
   );

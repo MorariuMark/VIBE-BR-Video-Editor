@@ -8,3 +8,4 @@ node/
 .venv/
 .hf_cache/
 scratch/
+models/

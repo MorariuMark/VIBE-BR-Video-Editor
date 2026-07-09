@@ -1000,6 +1000,13 @@ html, body, #root {
   flex-wrap: wrap;
 }
 
+.dialogue-block__timing-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+
 .dialogue-block__timing input {
   width: 46px;
   padding: 2px var(--sp-1);

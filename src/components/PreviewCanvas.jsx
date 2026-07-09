@@ -67,10 +67,10 @@ export default function PreviewCanvas() {
     });
   }, [state.characters]);
 
-  // Preload timeline images (for image clips on video tracks)
+  // Preload timeline images (for image clips on video & broll tracks)
   useEffect(() => {
     state.tracks.forEach(track => {
-      if (track.type === 'video') {
+      if (track.type === 'video' || track.type === 'broll') {
         track.clips.forEach(clip => {
           if (clip.type === 'image' && clip.dataUrl && !loadedImagesRef.current[clip.id]) {
             const img = new Image();
@@ -536,9 +536,11 @@ export default function PreviewCanvas() {
         }
       } else {
         const char = state.characters.find(c => c.id === state.selectedElementId);
-        const block = activeBlocks.find(b => b.characterId === state.selectedElementId);
-        if (char && block) {
-          const animTransform = getAnimatedTransform(block, currentTransform, state.currentTime);
+        const track = state.tracks.find(t => t.characterId === state.selectedElementId);
+        const activeClip = track?.clips.find(c => state.currentTime >= c.startTime && state.currentTime <= c.startTime + c.duration);
+        if (char && activeClip) {
+          const block = activeBlocks.find(b => b.characterId === state.selectedElementId);
+          const animTransform = block ? getAnimatedTransform(block, currentTransform, state.currentTime) : currentTransform;
           if (animTransform) {
             cx = animTransform.x * scaleFactor;
             cy = animTransform.y * scaleFactor;
@@ -731,9 +733,14 @@ export default function PreviewCanvas() {
     // 3. Check if clicking on active character PNG
     let clickedChar = null;
     let clickedTransform = null;
-    for (const block of activeBlocks) {
-      const char = state.characters.find(c => c.id === block.characterId);
+    const charTracks = state.tracks.filter(t => t.type === 'character');
+    for (const track of charTracks) {
+      const activeClip = track.clips.find(c => state.currentTime >= c.startTime && state.currentTime <= c.startTime + c.duration);
+      if (!activeClip) continue;
+
+      const char = state.characters.find(c => c.id === track.characterId);
       if (!char) continue;
+
       let transform = state.characterTransforms[char.id] || {
         x: state.canvasWidth / 2,
         y: state.canvasHeight * 0.65,
@@ -744,8 +751,12 @@ export default function PreviewCanvas() {
         transform = getInterpolatedKeyframeTransform(char.keyframes, state.currentTime);
       }
       const displayCx = transform.x * scaleFactor;
-      const displayCy = transform.y * scaleFactor;
-      const charSize = 640 * (transform.scale || 1) * scaleFactor;
+      let displayCy = transform.y * scaleFactor;
+      let charSize = 640 * (transform.scale || 1) * scaleFactor;
+      if (state.brollLayout === 'split') {
+        displayCy = (state.canvasHeight * 0.45 + transform.y * 0.55) * scaleFactor;
+        charSize = charSize * 0.55;
+      }
       const dist = Math.sqrt((x - displayCx) ** 2 + (y - displayCy) ** 2);
       if (dist < charSize / 2 + 10) {
         clickedChar = char;
@@ -759,9 +770,14 @@ export default function PreviewCanvas() {
       actions.startDragHistory();
       if (transformMode === 'rotate3d') {
         const cx = (clickedTransform?.x ?? (state.canvasWidth / 2)) * scaleFactor;
-        const cy = (clickedTransform?.y ?? (state.canvasHeight * 0.65)) * scaleFactor;
-        const w = 640 * (clickedTransform?.scale ?? 1) * scaleFactor;
-        const h = 640 * (clickedTransform?.scale ?? 1) * scaleFactor;
+        let cy = (clickedTransform?.y ?? (state.canvasHeight * 0.65)) * scaleFactor;
+        let w = 640 * (clickedTransform?.scale ?? 1) * scaleFactor;
+        let h = 640 * (clickedTransform?.scale ?? 1) * scaleFactor;
+        if (state.brollLayout === 'split') {
+          cy = (state.canvasHeight * 0.45 + (clickedTransform?.y ?? (state.canvasHeight * 0.65)) * 0.55) * scaleFactor;
+          w = w * 0.55;
+          h = h * 0.55;
+        }
         const rotation = clickedTransform?.rotation ?? 0;
 
         // Project mouse coordinate relative to center
@@ -837,19 +853,26 @@ export default function PreviewCanvas() {
         const isCaption = state.selectedElementId.startsWith('caption_');
         if (!isCaption) {
           const char = state.characters.find(c => c.id === state.selectedElementId);
-          const activeBlocks = getActiveBlocks(state.dialogueBlocks, state.currentTime);
-          const block = activeBlocks.find(b => b.characterId === state.selectedElementId);
-          if (char && block) {
+          const track = state.tracks.find(t => t.characterId === state.selectedElementId);
+          const activeClip = track?.clips.find(c => state.currentTime >= c.startTime && state.currentTime <= c.startTime + c.duration);
+          if (char && activeClip) {
             const defaultTransform = state.characterTransforms[char.id] || { x: state.canvasWidth / 2, y: state.canvasHeight * 0.65, scale: 1, rotation: 0 };
             const baseTransform = char.keyframingEnabled && char.keyframes?.length > 0
               ? getInterpolatedKeyframeTransform(char.keyframes, state.currentTime)
               : defaultTransform;
-            const animTransform = getAnimatedTransform(block, baseTransform, state.currentTime);
+            const activeBlocks = getActiveBlocks(state.dialogueBlocks, state.currentTime);
+            const block = activeBlocks.find(b => b.characterId === state.selectedElementId);
+            const animTransform = block ? getAnimatedTransform(block, baseTransform, state.currentTime) : baseTransform;
             if (animTransform) {
               const cx = animTransform.x * scaleFactor;
-              const cy = animTransform.y * scaleFactor;
-              const w = 640 * animTransform.scale * scaleFactor;
-              const h = 640 * animTransform.scale * scaleFactor;
+              let cy = animTransform.y * scaleFactor;
+              let w = 640 * animTransform.scale * scaleFactor;
+              let h = 640 * animTransform.scale * scaleFactor;
+              if (state.brollLayout === 'split') {
+                cy = (state.canvasHeight * 0.45 + animTransform.y * 0.55) * scaleFactor;
+                w = w * 0.55;
+                h = h * 0.55;
+              }
               const rotation = animTransform.rotation || 0;
 
               const dx = x - cx;
@@ -903,7 +926,8 @@ export default function PreviewCanvas() {
       const dx = x - dragging.startX;
       const dy = y - dragging.startY;
       const newX = dragging.origTransform.x + dx / scaleFactor;
-      const newY = dragging.origTransform.y + dy / scaleFactor;
+      const adjustedDy = state.brollLayout === 'split' ? (dy / 0.55) : dy;
+      const newY = dragging.origTransform.y + adjustedDy / scaleFactor;
 
       const isCaption = dragging.elementId.startsWith('caption_');
       const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
@@ -992,9 +1016,9 @@ export default function PreviewCanvas() {
       let newRotateY = prevRotateY;
       
       if (dragging.lockedAxis === 'X') {
-        newRotateX = Math.max(-90, Math.min(90, Math.round(prevRotateX - dy / 2)));
-      } else if (dragging.lockedAxis === 'Y') {
         newRotateY = Math.max(-90, Math.min(90, Math.round(prevRotateY + dx / 2)));
+      } else if (dragging.lockedAxis === 'Y') {
+        newRotateX = Math.max(-90, Math.min(90, Math.round(prevRotateX - dy / 2)));
       }
       
       const isCaption = dragging.elementId.startsWith('caption_');
@@ -1055,6 +1079,44 @@ export default function PreviewCanvas() {
     }
   };
 
+  const draggingRef = useRef(dragging);
+  const handleMouseMoveRef = useRef(null);
+  const handleMouseUpRef = useRef(null);
+
+  useEffect(() => {
+    draggingRef.current = dragging;
+  }, [dragging]);
+
+  useEffect(() => {
+    handleMouseMoveRef.current = handleCanvasMouseMove;
+  }, [handleCanvasMouseMove]);
+
+  useEffect(() => {
+    handleMouseUpRef.current = handleCanvasMouseUp;
+  }, [handleCanvasMouseUp]);
+
+  useEffect(() => {
+    const handleWindowMouseMove = (e) => {
+      if (draggingRef.current && handleMouseMoveRef.current) {
+        handleMouseMoveRef.current(e);
+      }
+    };
+
+    const handleWindowMouseUp = (e) => {
+      if (draggingRef.current && handleMouseUpRef.current) {
+        handleMouseUpRef.current(e);
+      }
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+  }, []);
+
   return (
     <div className="preview-panel">
       <div className="panel__header">
@@ -1100,6 +1162,31 @@ export default function PreviewCanvas() {
               title="Drag inside boundaries to rotate/tilt the PNG in 3D space"
             >
               3D Rotate
+            </button>
+            <button
+              onClick={() => {
+                if (state.selectedElementId && !state.selectedElementId.startsWith('caption_')) {
+                  actions.resetCharacterTransform(state.selectedElementId);
+                  actions.addToast('Reset character transforms', 'success');
+                } else {
+                  actions.addToast('Please select a character to reset transforms', 'warning');
+                }
+              }}
+              style={{
+                fontSize: '9px', padding: '2px 6px', height: 20, border: 'none', borderRadius: 3,
+                background: 'var(--surface-2)',
+                color: 'var(--accent-danger, #ff4081)',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                marginLeft: 4,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+              title="Reset selected character base transform properties"
+            >
+              <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              Reset
             </button>
           </div>
 
@@ -1182,9 +1269,8 @@ export default function PreviewCanvas() {
             width={canvasSize.width}
             height={canvasSize.height}
             onMouseDown={handleCanvasMouseDown}
-            onMouseMove={handleCanvasMouseMove}
-            onMouseUp={handleCanvasMouseUp}
-            onMouseLeave={handleCanvasMouseUp}
+            onMouseMove={dragging ? undefined : handleCanvasMouseMove}
+            onMouseUp={dragging ? undefined : handleCanvasMouseUp}
             onWheel={handleCanvasWheel}
             style={{ cursor: dragging ? 'grabbing' : state.activeTool === 'hand' ? 'grab' : 'default', willChange: 'transform', transform: 'translate3d(0,0,0)' }}
           />

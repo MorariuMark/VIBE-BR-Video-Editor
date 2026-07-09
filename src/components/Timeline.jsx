@@ -89,6 +89,23 @@ export default function Timeline() {
         } else {
           actions.addToast('Mismatched media type. Drag a video/image file here.', 'warning');
         }
+      } else if (track.type === 'broll') {
+        if (item.type === 'video' || item.type === 'image') {
+          const newClip = {
+            id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            name: item.name,
+            startTime,
+            duration: item.duration || 5, // default 5s
+            color: track.color || '#ffb74d',
+            path: item.path,
+            dataUrl: item.dataUrl,
+            type: item.type,
+          };
+          actions.addClipToTrack(track.id, newClip);
+          actions.addToast(`Added "${item.name}" to B-Roll overlay`, 'success');
+        } else {
+          actions.addToast('Mismatched media type. Drag a video/image file here.', 'warning');
+        }
       } else if (track.type === 'audio') {
         if (item.type === 'audio') {
           const newClip = {
@@ -162,7 +179,6 @@ export default function Timeline() {
 
   // ─── Clip dragging ───
   const handleClipMouseDown = (e, clip, trackId) => {
-    if (trackId === 'track_captions') return;
     if (e.target.classList.contains('timeline-clip__handle')) return;
     e.stopPropagation();
     
@@ -215,13 +231,38 @@ export default function Timeline() {
         
         const clipTrack = state.tracks.find(t => t.id === draggingClip.trackId);
         if (clipTrack && clipTrack.type === 'character') {
-          actions.updateBlockTiming(draggingClip.clipId, newStartTime, undefined);
+          const blockId = draggingClip.clipId.replace('presence_', '');
+          const block = state.dialogueBlocks.find(b => b.id === blockId);
+          const isLocked = block ? !block.unlocked : true;
+          if (isLocked) {
+            actions.updateBlockTiming(blockId, newStartTime, undefined);
+          } else {
+            actions.updateClipTiming(draggingClip.trackId, draggingClip.clipId, newStartTime, undefined);
+          }
+        } else if (clipTrack && clipTrack.type === 'captions') {
+          const blockId = draggingClip.clipId.replace('caption_', '');
+          actions.updateBlockTiming(blockId, newStartTime, undefined);
         } else {
           const clip = clipTrack?.clips.find(c => c.id === draggingClip.clipId);
           if (clip && clip.blockId) {
             actions.updateBlockTiming(clip.blockId, newStartTime, undefined);
           } else {
             actions.updateClipTiming(draggingClip.trackId, draggingClip.clipId, newStartTime, undefined);
+          }
+        }
+
+        if (clipTrack) {
+          const hoverEl = document.elementFromPoint(e.clientX, e.clientY);
+          const trackRow = hoverEl?.closest('.timeline-track');
+          if (trackRow) {
+            const targetTrackId = trackRow.getAttribute('data-track-id');
+            if (targetTrackId && targetTrackId !== draggingClip.trackId) {
+              const targetTrack = state.tracks.find(t => t.id === targetTrackId);
+              if (targetTrack && targetTrack.type === clipTrack.type) {
+                actions.moveClipToTrack(draggingClip.clipId, draggingClip.trackId, targetTrackId);
+                setDraggingClip(prev => ({ ...prev, trackId: targetTrackId }));
+              }
+            }
           }
         }
       }
@@ -232,13 +273,37 @@ export default function Timeline() {
         
         const clipTrack = state.tracks.find(t => t.id === resizingClip.trackId);
         if (clipTrack && clipTrack.type === 'character') {
+          const blockId = resizingClip.clipId.replace('presence_', '');
+          const block = state.dialogueBlocks.find(b => b.id === blockId);
+          const isLocked = block ? !block.unlocked : true;
+          if (isLocked) {
+            if (resizingClip.side === 'right') {
+              const newDuration = Math.max(0.2, resizingClip.origDuration + dt);
+              actions.updateBlockTiming(blockId, undefined, newDuration);
+            } else if (resizingClip.side === 'left') {
+              const newStartTime = Math.max(0, resizingClip.origStartTime + dt);
+              const newDuration = Math.max(0.2, resizingClip.origDuration - dt);
+              actions.updateBlockTiming(blockId, newStartTime, newDuration);
+            }
+          } else {
+            if (resizingClip.side === 'right') {
+              const newDuration = Math.max(0.2, resizingClip.origDuration + dt);
+              actions.updateClipTiming(resizingClip.trackId, resizingClip.clipId, undefined, newDuration);
+            } else if (resizingClip.side === 'left') {
+              const newStartTime = Math.max(0, resizingClip.origStartTime + dt);
+              const newDuration = Math.max(0.2, resizingClip.origDuration - dt);
+              actions.updateClipTiming(resizingClip.trackId, resizingClip.clipId, newStartTime, newDuration);
+            }
+          }
+        } else if (clipTrack && clipTrack.type === 'captions') {
+          const blockId = resizingClip.clipId.replace('caption_', '');
           if (resizingClip.side === 'right') {
             const newDuration = Math.max(0.2, resizingClip.origDuration + dt);
-            actions.updateBlockTiming(resizingClip.clipId, undefined, newDuration);
+            actions.updateBlockTiming(blockId, undefined, newDuration);
           } else if (resizingClip.side === 'left') {
             const newStartTime = Math.max(0, resizingClip.origStartTime + dt);
             const newDuration = Math.max(0.2, resizingClip.origDuration - dt);
-            actions.updateBlockTiming(resizingClip.clipId, newStartTime, newDuration);
+            actions.updateBlockTiming(blockId, newStartTime, newDuration);
           }
         } else {
           const clip = clipTrack?.clips.find(c => c.id === resizingClip.clipId);
@@ -282,7 +347,6 @@ export default function Timeline() {
   }, [draggingClip, resizingClip, pixelsPerSecond]);
 
   const handleClipContextMenu = (e, clip, trackId) => {
-    if (trackId === 'track_captions') return;
     e.preventDefault();
     e.stopPropagation();
     
@@ -383,6 +447,21 @@ export default function Timeline() {
     setTrackContextMenu(null);
   };
 
+  const handleExtractAudio = () => {
+    if (!clipContextMenu) return;
+    const { clip, trackId } = clipContextMenu;
+    actions.extractAudio(trackId, clip.id);
+    actions.addToast('Extracted audio from video clip onto separate track', 'success');
+    setClipContextMenu(null);
+  };
+
+  const handleAddSpecificTrackAbove = (track) => {
+    setTrackContextMenu(null);
+    const typeLabel = track.type.charAt(0).toUpperCase() + track.type.slice(1);
+    actions.addTrack(track.type, `New ${typeLabel} Track`, track.id);
+    actions.addToast(`Added new ${track.type} track above ${track.name}`, 'success');
+  };
+
   const handleRedoVoiceLine = async () => {
     if (!clipContextMenu) return;
     const { clip, trackId } = clipContextMenu;
@@ -411,6 +490,12 @@ export default function Timeline() {
     } else {
       actions.addToast("Voice Cloning requires the desktop Electron environment.", "warning");
     }
+  };
+
+  const handleToggleClipLock = (blockId, isLocked) => {
+    setClipContextMenu(null);
+    actions.setClipLock(blockId, !isLocked);
+    actions.addToast(isLocked ? 'Unlinked presence and captions clips' : 'Synchronized presence and captions clips', 'info');
   };
 
   // Find selected clip and its track
@@ -518,6 +603,37 @@ export default function Timeline() {
       {/* Timeline Toolbar */}
       <div className="timeline-toolbar">
         <div className="toolbar__group" style={{ borderLeft: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            onClick={() => {
+              if (confirm('Are you sure you want to reset all splits, cuts, and layer ordering on the timeline? This will restore clips to their original sequence.')) {
+                actions.resetTimeline();
+                actions.addToast('Timeline reset successfully', 'success');
+              }
+            }}
+            title="Reset all splits, cuts, and layer order (Undoable)"
+            style={{
+              height: 22,
+              padding: '0 8px',
+              fontSize: '10px',
+              fontWeight: 'bold',
+              borderRadius: 4,
+              color: '#ffffff',
+              background: 'rgba(255, 64, 129, 0.8)',
+              border: 'none',
+              marginRight: 10,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+              transition: 'background 0.15s'
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 64, 129, 1)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 64, 129, 0.8)'; }}
+          >
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="3"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            Reset Timeline
+          </button>
           <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginRight: 2 }}>Select:</span>
           <button
             className={`toolbar__btn ${state.activeTool === 'select' ? 'toolbar__btn--active' : ''}`}
@@ -690,6 +806,7 @@ export default function Timeline() {
         {tracks.map(track => (
           <div
             key={track.id}
+            data-track-id={track.id}
             className={`timeline-track ${track.type === 'audio' ? 'timeline-track--audio' : ''} ${dragOverTrackId === track.id ? 'timeline-track--dragover' : ''}`}
             onDragOver={(e) => {
               if (draggingTrackId) {
@@ -760,25 +877,23 @@ export default function Timeline() {
                   style={{
                     left: `${clip.startTime * pixelsPerSecond}px`,
                     width: `${Math.max(20, clip.duration * pixelsPerSecond)}px`,
-                    background: `linear-gradient(135deg, ${clip.color}cc, ${clip.color}88)`,
+                    background: track.type === 'captions'
+                      ? `repeating-linear-gradient(45deg, rgba(255,255,255,0.12) 0px, rgba(255,255,255,0.12) 6px, transparent 6px, transparent 12px), linear-gradient(135deg, ${clip.color}dd, ${clip.color}aa)`
+                      : `linear-gradient(135deg, ${clip.color}cc, ${clip.color}88)`,
                     cursor: state.activeTool === 'cut' ? 'crosshair' : 'grab',
                   }}
                   onMouseDown={(e) => handleClipMouseDown(e, clip, track.id)}
                   onContextMenu={(e) => handleClipContextMenu(e, clip, track.id)}
                 >
-                  {track.type !== 'captions' && (
-                    <div
-                      className="timeline-clip__handle timeline-clip__handle--left"
-                      onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'left')}
-                    />
-                  )}
+                  <div
+                    className="timeline-clip__handle timeline-clip__handle--left"
+                    onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'left')}
+                  />
                   <span className="timeline-clip__label">{clip.name}</span>
-                  {track.type !== 'captions' && (
-                    <div
-                      className="timeline-clip__handle timeline-clip__handle--right"
-                      onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'right')}
-                    />
-                  )}
+                  <div
+                    className="timeline-clip__handle timeline-clip__handle--right"
+                    onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'right')}
+                  />
                 </div>
               ))}
 
@@ -854,6 +969,57 @@ export default function Timeline() {
           {(clipContextMenu.clip.blockId || (clipContextMenu.trackId.startsWith('track_') && !clipContextMenu.trackId.includes('bg') && !clipContextMenu.trackId.includes('audio'))) && (
             <HoverMenuItem text="Redo Voice Line" onClick={handleRedoVoiceLine} />
           )}
+          {(() => {
+            const { clip, trackId } = clipContextMenu;
+            let blockId = null;
+            if (clip.blockId) {
+              blockId = clip.blockId;
+            } else if (clip.id && clip.id.startsWith('presence_')) {
+              blockId = clip.id.replace('presence_', '');
+            } else if (trackId === 'track_captions') {
+              blockId = clip.id.replace('caption_', '');
+            } else if (trackId.startsWith('track_') && !trackId.includes('bg') && !trackId.includes('audio')) {
+              if (clip.id.startsWith('presence_')) {
+                blockId = clip.id.replace('presence_', '');
+              } else {
+                blockId = clip.id;
+              }
+            }
+            if (!blockId) return null;
+            const block = state.dialogueBlocks.find(b => b.id === blockId);
+            if (!block) return null;
+            const isLocked = !block.unlocked;
+            return (
+              <HoverMenuItem 
+                text={isLocked ? "🔓 Unlock Timeline Sync" : "🔒 Lock Timeline Sync"} 
+                onClick={() => handleToggleClipLock(blockId, isLocked)} 
+              />
+            );
+          })()}
+          {(() => {
+            const clipTrack = state.tracks.find(t => t.id === clipContextMenu.trackId);
+            if (!clipTrack) return null;
+            const isVideoClip = clipTrack.type === 'video';
+            const otherTracks = state.tracks.filter(t => t.type === clipTrack.type && t.id !== clipTrack.id);
+            return (
+              <>
+                {isVideoClip && (
+                  <HoverMenuItem text="🔊 Extract Audio" onClick={handleExtractAudio} />
+                )}
+                {otherTracks.map(t => (
+                  <HoverMenuItem 
+                    key={t.id}
+                    text={`Move to ${t.name}`} 
+                    onClick={() => {
+                      actions.moveClipToTrack(clipContextMenu.clip.id, clipContextMenu.trackId, t.id);
+                      actions.addToast(`Moved clip to ${t.name}`, 'success');
+                      setClipContextMenu(null);
+                    }} 
+                  />
+                ))}
+              </>
+            );
+          })()}
           <HoverMenuItem text="Rename Clip..." onClick={handleRenameClip} />
           <HoverMenuItem text="Delete Clip" color="#ff4081" onClick={handleDeleteClip} />
         </div>
@@ -875,6 +1041,10 @@ export default function Timeline() {
           }}
           onClick={(e) => e.stopPropagation()}
         >
+          <HoverMenuItem 
+            text={`New ${trackContextMenu.track.type.charAt(0).toUpperCase() + trackContextMenu.track.type.slice(1)} Track Above`} 
+            onClick={() => handleAddSpecificTrackAbove(trackContextMenu.track)} 
+          />
           <HoverMenuItem text="Rename Track..." onClick={handleRenameTrack} />
           <HoverMenuItem text="Delete Track" color="#ff4081" onClick={handleDeleteTrack} />
         </div>

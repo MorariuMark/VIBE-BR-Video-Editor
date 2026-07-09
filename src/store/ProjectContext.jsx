@@ -15,6 +15,7 @@ const initialState = {
   scriptText: '',
   dialogueBlocks: [],
   characters: [], // { id, name, color, asset, colorIndex, textStyle }
+  characterPresenceClips: [],
   
   // Timeline
   tracks: [],
@@ -39,6 +40,9 @@ const initialState = {
   
   // Background video
   backgroundVideo: null, // { name, path, dataUrl, duration }
+  
+  // B-Roll Overlay
+  brollLayout: 'none', // 'none' | 'split' | 'pip'
   
   // Export
   isExporting: false,
@@ -96,6 +100,10 @@ const ActionTypes = {
   SELECT_CLIP: 'SELECT_CLIP',
   
   SET_CHARACTER_TRANSFORM: 'SET_CHARACTER_TRANSFORM',
+  RESET_CHARACTER_TRANSFORM: 'RESET_CHARACTER_TRANSFORM',
+  RESET_CHARACTER_KEYFRAMES: 'RESET_CHARACTER_KEYFRAMES',
+  SET_CLIP_LOCK: 'SET_CLIP_LOCK',
+  RESET_TIMELINE: 'RESET_TIMELINE',
   SELECT_ELEMENT: 'SELECT_ELEMENT',
   SELECT_KEYFRAME: 'SELECT_KEYFRAME',
   
@@ -136,6 +144,10 @@ const ActionTypes = {
   UPDATE_KEYFRAME: 'UPDATE_KEYFRAME',
   REMOVE_ALL_VOICES_FROM_TIMELINE: 'REMOVE_ALL_VOICES_FROM_TIMELINE',
   DELETE_ALL_VOICES_FROM_LIBRARY: 'DELETE_ALL_VOICES_FROM_LIBRARY',
+  JUMP_TO_HISTORY_STATE: 'JUMP_TO_HISTORY_STATE',
+  MOVE_CLIP_TO_TRACK: 'MOVE_CLIP_TO_TRACK',
+  EXTRACT_AUDIO: 'EXTRACT_AUDIO',
+  SET_BROLL_LAYOUT: 'SET_BROLL_LAYOUT',
 };
 
 // ─── Helpers ───
@@ -154,19 +166,26 @@ function coreProjectReducer(state, action) {
     case ActionTypes.PARSE_SCRIPT: {
       const { blocks, characters } = parseScript(action.payload || state.scriptText);
       
-      // Merge with existing character assets and text styles
       const mergedCharacters = characters.map(char => {
         const existing = state.characters.find(c => c.id === char.id);
         return existing ? { ...char, asset: existing.asset, textStyle: existing.textStyle || char.textStyle } : char;
       });
       
+      const characterPresenceClips = blocks.map(b => ({
+        id: `presence_${b.id}`,
+        characterId: b.characterId,
+        startTime: b.startTime,
+        duration: b.duration,
+      }));
+      
       const totalDuration = recalculateTotalDuration(blocks);
-      const tracks = generateTracksFromBlocks(blocks, mergedCharacters, { ...state, totalDuration, tracks: [] });
+      const tracks = generateTracksFromBlocks(blocks, mergedCharacters, { ...state, totalDuration, characterPresenceClips, tracks: [] });
       
       return {
         ...state,
         dialogueBlocks: blocks,
         characters: mergedCharacters,
+        characterPresenceClips,
         tracks,
         totalDuration,
       };
@@ -183,16 +202,58 @@ function coreProjectReducer(state, action) {
     
     case ActionTypes.UPDATE_BLOCK_TIMING: {
       const { blockId, startTime, duration } = action.payload;
+      const oldBlock = state.dialogueBlocks.find(b => b.id === blockId);
       let blocks = state.dialogueBlocks.map(b =>
         b.id === blockId ? { ...b, startTime: startTime ?? b.startTime, duration: duration ?? b.duration } : b
       );
       const idx = blocks.findIndex(b => b.id === blockId);
       if (idx >= 0) {
-        blocks = recalculateTimings(blocks, idx);
+        blocks = recalculateTimings(blocks, idx, oldBlock);
       }
+
+      // Sync corresponding locked presence clip(s)
+      const targetBlock = blocks.find(b => b.id === blockId);
+      const isLocked = targetBlock ? !targetBlock.unlocked : true;
+      let characterPresenceClips = state.characterPresenceClips || [];
+      if (isLocked) {
+        characterPresenceClips = characterPresenceClips.map(clip => {
+          if (clip.id === `presence_${blockId}`) {
+            return {
+              ...clip,
+              startTime: targetBlock.startTime,
+              duration: targetBlock.duration,
+            };
+          }
+          return clip;
+        });
+
+        // Also shift subsequent locked presence clips if a ripple edit occurred
+        if (oldBlock) {
+          const oldEndTime = oldBlock.startTime + oldBlock.duration;
+          const newEndTime = targetBlock.startTime + targetBlock.duration;
+          const delta = newEndTime - oldEndTime;
+          if (delta !== 0) {
+            for (let i = idx + 1; i < blocks.length; i++) {
+              const subBlock = blocks[i];
+              if (!subBlock.unlocked) {
+                characterPresenceClips = characterPresenceClips.map(clip => {
+                  if (clip.id === `presence_${subBlock.id}`) {
+                    return {
+                      ...clip,
+                      startTime: subBlock.startTime,
+                    };
+                  }
+                  return clip;
+                });
+              }
+            }
+          }
+        }
+      }
+
       const totalDuration = recalculateTotalDuration(blocks);
-      const tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration });
-      return { ...state, dialogueBlocks: blocks, totalDuration, tracks };
+      const tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration, characterPresenceClips });
+      return { ...state, dialogueBlocks: blocks, totalDuration, tracks, characterPresenceClips };
     }
     
     case ActionTypes.SET_BLOCKS: {
@@ -200,6 +261,95 @@ function coreProjectReducer(state, action) {
       const totalDuration = recalculateTotalDuration(blocks);
       const tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration });
       return { ...state, dialogueBlocks: blocks, totalDuration, tracks };
+    }
+    
+    case ActionTypes.RESET_CHARACTER_TRANSFORM: {
+      const characterId = action.payload;
+      return {
+        ...state,
+        characterTransforms: {
+          ...state.characterTransforms,
+          [characterId]: {
+            x: state.canvasWidth / 2,
+            y: state.canvasHeight * 0.65,
+            scale: 1,
+            rotation: 0,
+            skewX: 0,
+            skewY: 0,
+            rotateX: 0,
+            rotateY: 0,
+            flipX: 1,
+            flipY: 1,
+          },
+        },
+      };
+    }
+    
+    case ActionTypes.RESET_CHARACTER_KEYFRAMES: {
+      const characterId = action.payload;
+      const characters = state.characters.map(c =>
+        c.id === characterId ? { ...c, keyframes: [] } : c
+      );
+      return { ...state, characters, selectedKeyframeIndex: null };
+    }
+    
+    case ActionTypes.SET_CLIP_LOCK: {
+      const { blockId, locked } = action.payload;
+      const blocks = state.dialogueBlocks.map(b =>
+        b.id === blockId ? { ...b, unlocked: !locked } : b
+      );
+      
+      let characterPresenceClips = state.characterPresenceClips || [];
+      if (locked) {
+        const block = blocks.find(b => b.id === blockId);
+        if (block) {
+          characterPresenceClips = characterPresenceClips.map(clip => {
+            if (clip.id === `presence_${blockId}`) {
+              return {
+                ...clip,
+                startTime: block.startTime,
+                duration: block.duration,
+              };
+            }
+            return clip;
+          });
+        }
+      }
+
+      const totalDuration = recalculateTotalDuration(blocks);
+      const tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration, characterPresenceClips });
+      return { ...state, dialogueBlocks: blocks, totalDuration, tracks, characterPresenceClips };
+    }
+    
+    case ActionTypes.RESET_TIMELINE: {
+      const { blocks, characters } = parseScript(state.scriptText || '');
+      
+      const mergedCharacters = characters.map(char => {
+        const existing = state.characters.find(c => c.id === char.id);
+        return existing ? { ...char, asset: existing.asset, textStyle: existing.textStyle || char.textStyle } : char;
+      });
+      
+      const characterPresenceClips = blocks.map(b => ({
+        id: `presence_${b.id}`,
+        characterId: b.characterId,
+        startTime: b.startTime,
+        duration: b.duration,
+      }));
+      
+      const totalDuration = recalculateTotalDuration(blocks);
+      const tracks = generateTracksFromBlocks(blocks, mergedCharacters, { ...state, totalDuration, characterPresenceClips, tracks: [] });
+      
+      return {
+        ...state,
+        dialogueBlocks: blocks,
+        characters: mergedCharacters,
+        characterPresenceClips,
+        tracks,
+        totalDuration,
+        selectedClipId: null,
+        selectedElementId: null,
+        selectedKeyframeIndex: null,
+      };
     }
     
     case ActionTypes.ADD_CHARACTER: {
@@ -218,6 +368,7 @@ function coreProjectReducer(state, action) {
       return {
         ...state,
         characters: state.characters.filter(c => c.id !== action.payload),
+        characterPresenceClips: (state.characterPresenceClips || []).filter(c => c.characterId !== action.payload),
       };
     
     case ActionTypes.ASSIGN_CHARACTER_ASSET: {
@@ -376,6 +527,11 @@ function coreProjectReducer(state, action) {
     
     case ActionTypes.REMOVE_CLIP_FROM_TRACK: {
       const { trackId, clipId } = action.payload;
+      const isCharTrack = trackId.startsWith('track_') && trackId !== 'track_captions' && !trackId.startsWith('track_bg') && !trackId.startsWith('track_audio');
+      let characterPresenceClips = state.characterPresenceClips || [];
+      if (isCharTrack) {
+        characterPresenceClips = characterPresenceClips.filter(c => c.id !== clipId);
+      }
       const tracks = state.tracks.map(track => {
         if (track.id !== trackId) return track;
         return {
@@ -383,11 +539,23 @@ function coreProjectReducer(state, action) {
           clips: track.clips.filter(c => c.id !== clipId),
         };
       });
-      return { ...state, tracks };
+      return { ...state, tracks, characterPresenceClips };
     }
     
     case ActionTypes.UPDATE_CLIP_TIMING: {
       const { trackId, clipId, startTime, duration } = action.payload;
+      const isCharTrack = trackId.startsWith('track_') && trackId !== 'track_captions' && !trackId.startsWith('track_bg') && !trackId.startsWith('track_audio');
+      let characterPresenceClips = state.characterPresenceClips || [];
+      if (isCharTrack) {
+        characterPresenceClips = characterPresenceClips.map(clip => {
+          if (clip.id !== clipId) return clip;
+          return {
+            ...clip,
+            startTime: startTime ?? clip.startTime,
+            duration: duration ?? clip.duration,
+          };
+        });
+      }
       const tracks = state.tracks.map(track => {
         if (track.id !== trackId) return track;
         return {
@@ -403,7 +571,7 @@ function coreProjectReducer(state, action) {
           }),
         };
       });
-      return { ...state, tracks };
+      return { ...state, tracks, characterPresenceClips };
     }
     
     case ActionTypes.UPDATE_CLIP_PROPERTIES: {
@@ -498,9 +666,40 @@ function coreProjectReducer(state, action) {
         return state;
       }
       
-      // CASE A: Character presence track (split the actual underlying dialogue block)
+      // CASE A: Character presence track (split the presence clip in characterPresenceClips)
       if (track.type === 'character') {
-        const block = state.dialogueBlocks.find(b => b.id === clipId);
+        const presClip = (state.characterPresenceClips || []).find(c => c.id === clipId);
+        if (!presClip) return state;
+
+        const duration1 = splitTime - presClip.startTime;
+        const duration2 = presClip.startTime + presClip.duration - splitTime;
+
+        const clip1 = { ...presClip, duration: duration1 };
+        const clip2 = {
+          ...presClip,
+          id: `presence_${presClip.characterId}_${Date.now()}`,
+          startTime: splitTime,
+          duration: duration2,
+        };
+
+        const characterPresenceClips = [
+          ...state.characterPresenceClips.filter(c => c.id !== clipId),
+          clip1,
+          clip2,
+        ].sort((a, b) => a.startTime - b.startTime);
+
+        const tracks = generateTracksFromBlocks(state.dialogueBlocks, state.characters, { ...state, characterPresenceClips });
+        return {
+          ...state,
+          characterPresenceClips,
+          tracks,
+        };
+      }
+
+      // CASE B: Captions track (split the actual underlying dialogue block)
+      if (track.type === 'captions') {
+        const blockId = clipId.replace('caption_', '');
+        const block = state.dialogueBlocks.find(b => b.id === blockId);
         if (!block) return state;
         
         const duration1 = splitTime - block.startTime;
@@ -618,12 +817,29 @@ function coreProjectReducer(state, action) {
         const blockIdx = blocks.findIndex(b => b.id === item.blockId);
         if (blockIdx === -1) return;
 
+        const oldBlock = blocks[blockIdx];
         blocks[blockIdx] = {
           ...blocks[blockIdx],
           duration: item.duration,
           words: item.words || [],
         };
-        blocks = recalculateTimings(blocks, blockIdx);
+        blocks = recalculateTimings(blocks, blockIdx, oldBlock);
+      });
+
+      let characterPresenceClips = [...(state.characterPresenceClips || [])];
+      items.forEach(item => {
+        const correspondingBlock = blocks.find(b => b.id === item.blockId);
+        if (!correspondingBlock) return;
+        characterPresenceClips = characterPresenceClips.map(clip => {
+          if (clip.id === `presence_${item.blockId}`) {
+            return {
+              ...clip,
+              startTime: correspondingBlock.startTime,
+              duration: correspondingBlock.duration,
+            };
+          }
+          return clip;
+        });
       });
 
       let audioTrackIdx = tracks.findIndex(t => t.type === 'audio');
@@ -676,11 +892,12 @@ function coreProjectReducer(state, action) {
       });
 
       const totalDuration = recalculateTotalDuration(blocks);
-      tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration, tracks });
+      tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration, characterPresenceClips, tracks });
 
       return {
         ...state,
         dialogueBlocks: blocks,
+        characterPresenceClips,
         tracks,
         totalDuration,
       };
@@ -807,6 +1024,124 @@ function coreProjectReducer(state, action) {
       };
     }
 
+    case ActionTypes.MOVE_CLIP_TO_TRACK: {
+      const { clipId, fromTrackId, toTrackId } = action.payload;
+      if (fromTrackId === toTrackId) return state;
+      
+      const fromTrack = state.tracks.find(t => t.id === fromTrackId);
+      const toTrack = state.tracks.find(t => t.id === toTrackId);
+      if (!fromTrack || !toTrack) return state;
+      
+      const clip = fromTrack.clips.find(c => c.id === clipId);
+      if (!clip) return state;
+      
+      const tracks = state.tracks.map(t => {
+        if (t.id === fromTrackId) {
+          return {
+            ...t,
+            clips: t.clips.filter(c => c.id !== clipId),
+          };
+        }
+        if (t.id === toTrackId) {
+          return {
+            ...t,
+            clips: [...t.clips, clip].sort((a, b) => a.startTime - b.startTime),
+          };
+        }
+        return t;
+      });
+      
+      return { ...state, tracks };
+    }
+    
+    case ActionTypes.EXTRACT_AUDIO: {
+      const { videoTrackId, clipId } = action.payload;
+      const videoTrack = state.tracks.find(t => t.id === videoTrackId);
+      if (!videoTrack) return state;
+      const videoClip = videoTrack.clips.find(c => c.id === clipId);
+      if (!videoClip) return state;
+      
+      const updatedTracks = state.tracks.map(t => {
+        if (t.id === videoTrackId) {
+          return {
+            ...t,
+            clips: t.clips.map(c => c.id === clipId ? { ...c, volume: 0 } : c)
+          };
+        }
+        return t;
+      });
+      
+      let audioTrack = updatedTracks.find(t => t.type === 'audio');
+      let finalTracks = [...updatedTracks];
+      
+      const newAudioClip = {
+        id: `audio_extracted_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        name: `${videoClip.name} (Audio)`,
+        startTime: videoClip.startTime,
+        duration: videoClip.duration,
+        path: videoClip.path,
+        dataUrl: videoClip.dataUrl,
+        type: 'audio',
+        volume: 1.0,
+        speed: videoClip.speed ?? 1.0,
+      };
+      
+      if (audioTrack) {
+        finalTracks = finalTracks.map(t => {
+          if (t.id === audioTrack.id) {
+            return {
+              ...t,
+              clips: [...t.clips, newAudioClip].sort((a, b) => a.startTime - b.startTime)
+            };
+          }
+          return t;
+        });
+      } else {
+        const newAudioTrack = {
+          id: `audio_track_${Date.now()}`,
+          name: 'Extracted Audio',
+          type: 'audio',
+          color: '#00e5ff',
+          clips: [newAudioClip],
+        };
+        finalTracks.push(newAudioTrack);
+      }
+      
+      return { ...state, tracks: finalTracks };
+    }
+
+    case ActionTypes.SET_BROLL_LAYOUT: {
+      const { layout } = action.payload;
+      let tracks = [...state.tracks];
+      const hasBroll = tracks.some(t => t.type === 'broll');
+      
+      if (layout === 'none') {
+        tracks = tracks.filter(t => t.type !== 'broll');
+      } else {
+        if (!hasBroll) {
+          const newBrollTrack = {
+            id: 'track_broll_1',
+            name: 'B-Roll Overlay',
+            type: 'broll',
+            color: '#ffb74d',
+            clips: [],
+          };
+          const videoTrackIdx = tracks.findIndex(t => t.type === 'video');
+          if (videoTrackIdx !== -1) {
+            tracks.splice(videoTrackIdx, 0, newBrollTrack);
+          } else {
+            tracks.push(newBrollTrack);
+          }
+        }
+      }
+      
+      return {
+        ...state,
+        brollLayout: layout,
+        tracks,
+      };
+    }
+
     case ActionTypes.DELETE_ALL_VOICES_FROM_LIBRARY: {
       const mediaItems = state.mediaItems.filter(item => !item.isVoiceClone);
       return {
@@ -846,7 +1181,57 @@ const UNDOABLE_ACTIONS = new Set([
   'UPDATE_CLIP_PROPERTIES',
   'SET_VOICE_CONFIGS',
   'BATCH_APPLY_VOICES',
+  'RESET_CHARACTER_TRANSFORM',
+  'RESET_CHARACTER_KEYFRAMES',
+  'SET_CLIP_LOCK',
+  'RESET_TIMELINE',
+  'MOVE_CLIP_TO_TRACK',
+  'EXTRACT_AUDIO',
+  'SET_BROLL_LAYOUT',
 ]);
+
+function getHumanReadableActionName(actionType) {
+  const map = {
+    SET_SCRIPT: 'Edit Script',
+    PARSE_SCRIPT: 'Parse Script',
+    UPDATE_BLOCK: 'Edit Dialogue',
+    UPDATE_BLOCK_TIMING: 'Adjust Timing',
+    ADD_CHARACTER: 'Add Character',
+    REMOVE_CHARACTER: 'Remove Character',
+    UPDATE_CHARACTER: 'Rename Character',
+    ASSIGN_CHARACTER_ASSET: 'Assign Asset',
+    ADD_MEDIA: 'Import Media',
+    REMOVE_MEDIA: 'Remove Media',
+    RENAME_MEDIA: 'Rename Media',
+    SET_AUDIO: 'Set Audio File',
+    SET_BACKGROUND_VIDEO: 'Set Background Video',
+    ADD_TRACK: 'Add Track',
+    REMOVE_TRACK: 'Remove Track',
+    UPDATE_TRACK_PROPERTIES: 'Modify Track',
+    ADD_CLIP_TO_TRACK: 'Add Clip to Track',
+    REMOVE_CLIP_FROM_TRACK: 'Remove Clip',
+    UPDATE_CLIP_TIMING: 'Move/Resize Clip',
+    UPDATE_CLIP_PROPERTIES: 'Edit Clip Properties',
+    SET_VOICE_CONFIGS: 'Modify Voice Settings',
+    BATCH_APPLY_VOICES: 'Generate AI Voices',
+    TOGGLE_CHARACTER_KEYFRAMING: 'Toggle Keyframing',
+    ADD_KEYFRAME: 'Add Keyframe',
+    REMOVE_KEYFRAME: 'Remove Keyframe',
+    UPDATE_KEYFRAME: 'Edit Keyframe',
+    UPDATE_CHARACTER_STYLE: 'Update Captions Style',
+    REMOVE_ALL_VOICES_FROM_TIMELINE: 'Clear Timeline Voices',
+    DELETE_ALL_VOICES_FROM_LIBRARY: 'Delete Library Voices',
+    SET_PROJECT_RESOLUTION: 'Change Aspect Ratio',
+    RESET_CHARACTER_TRANSFORM: 'Reset character transforms',
+    RESET_CHARACTER_KEYFRAMES: 'Reset Character keyframes',
+    SET_CLIP_LOCK: 'Toggle clip lock',
+    RESET_TIMELINE: 'Reset Timeline',
+    MOVE_CLIP_TO_TRACK: 'Move Clip to Track',
+    EXTRACT_AUDIO: 'Extract Audio from Video',
+    SET_BROLL_LAYOUT: 'Change B-Roll Layout',
+  };
+  return map[actionType] || actionType;
+}
 
 function getProjectSnapshot(state) {
   return {
@@ -861,6 +1246,9 @@ function getProjectSnapshot(state) {
     audioFile: state.audioFile,
     backgroundVideo: state.backgroundVideo,
     voiceConfigs: state.voiceConfigs,
+    lastActionLabel: state.lastActionLabel || 'Open Project',
+    characterPresenceClips: state.characterPresenceClips || [],
+    brollLayout: state.brollLayout || 'none',
   };
 }
 
@@ -878,7 +1266,7 @@ function projectReducer(state, action) {
       ...previous,
       history: {
         past: newPast,
-        future: [currentSnapshot, ...future],
+        future: [{ ...currentSnapshot, lastActionLabel: state.lastActionLabel || 'Open Project' }, ...future],
         dragStartSnapshot,
       }
     };
@@ -896,7 +1284,52 @@ function projectReducer(state, action) {
       ...state,
       ...next,
       history: {
-        past: [...past, currentSnapshot],
+        past: [...past, { ...currentSnapshot, lastActionLabel: state.lastActionLabel || 'Open Project' }],
+        future: newFuture,
+        dragStartSnapshot,
+      }
+    };
+  }
+  
+  if (action.type === ActionTypes.JUMP_TO_HISTORY_STATE) {
+    const targetIdx = action.payload;
+    const { past, future, dragStartSnapshot } = state.history;
+    const allStates = [
+      ...past.map(p => ({ ...p, sourceStack: 'past' })),
+      { ...getProjectSnapshot(state), lastActionLabel: state.lastActionLabel || 'Open Project', sourceStack: 'current' },
+      ...future.map(f => ({ ...f, sourceStack: 'future' }))
+    ];
+    
+    if (targetIdx < 0 || targetIdx >= allStates.length) return state;
+    if (targetIdx === past.length) return state;
+    
+    const targetState = allStates[targetIdx];
+    
+    let newPast = [];
+    let newFuture = [];
+    
+    if (targetIdx < past.length) {
+      newPast = past.slice(0, targetIdx);
+      newFuture = [
+        ...past.slice(targetIdx + 1),
+        { ...getProjectSnapshot(state), lastActionLabel: state.lastActionLabel || 'Open Project' },
+        ...future
+      ];
+    } else {
+      const futureIdx = targetIdx - past.length - 1;
+      newPast = [
+        ...past,
+        { ...getProjectSnapshot(state), lastActionLabel: state.lastActionLabel || 'Open Project' },
+        ...future.slice(0, futureIdx)
+      ];
+      newFuture = future.slice(futureIdx + 1);
+    }
+    
+    return {
+      ...state,
+      ...targetState,
+      history: {
+        past: newPast,
         future: newFuture,
         dragStartSnapshot,
       }
@@ -922,11 +1355,13 @@ function projectReducer(state, action) {
     const hasChanged = JSON.stringify(currentSnapshot) !== JSON.stringify(dragStartSnapshot);
     
     if (hasChanged) {
-      const newPast = [...past, dragStartSnapshot];
+      const actionLabel = "Drag Element";
+      const stateWithLabel = { ...state, lastActionLabel: actionLabel };
+      const newPast = [...past, { ...dragStartSnapshot, lastActionLabel: state.lastActionLabel || 'Open Project' }];
       if (newPast.length > 50) newPast.shift();
       
       return {
-        ...state,
+        ...stateWithLabel,
         history: {
           past: newPast,
           future: [],
@@ -949,12 +1384,24 @@ function projectReducer(state, action) {
 
   const nextState = coreProjectReducer(state, action);
 
+  if (nextState && !nextState.characterPresenceClips && nextState.dialogueBlocks) {
+    nextState.characterPresenceClips = nextState.dialogueBlocks.map(b => ({
+      id: `presence_${b.id}`,
+      characterId: b.characterId,
+      startTime: b.startTime,
+      duration: b.duration,
+    }));
+  }
+
   if (shouldSaveHistory) {
     const postSnapshot = getProjectSnapshot(nextState);
     const hasChanged = JSON.stringify(preSnapshot) !== JSON.stringify(postSnapshot);
     
     if (hasChanged) {
-      const newPast = [...state.history.past, preSnapshot];
+      const actionLabel = getHumanReadableActionName(action.type);
+      nextState.lastActionLabel = actionLabel;
+      
+      const newPast = [...state.history.past, { ...preSnapshot, lastActionLabel: state.lastActionLabel || 'Open Project' }];
       if (newPast.length > 50) newPast.shift();
       
       return {
@@ -975,28 +1422,32 @@ function projectReducer(state, action) {
  * Generate timeline tracks from dialogue blocks
  */
 function generateTracksFromBlocks(blocks, characters, state) {
+  const presenceClips = state.characterPresenceClips && state.characterPresenceClips.length > 0
+    ? state.characterPresenceClips
+    : blocks.map(b => ({ id: `presence_${b.id}`, characterId: b.characterId, startTime: b.startTime, duration: b.duration }));
+
   // 1. Character tracks (placed at the top of the stack)
   const charTracks = characters.map(char => {
-    const charBlocks = blocks.filter(b => b.characterId === char.id);
+    const charPresence = presenceClips.filter(p => p.characterId === char.id);
     return {
       id: `track_${char.id}`,
       name: char.name,
       type: 'character',
       color: char.color,
       characterId: char.id,
-      clips: charBlocks.map(block => ({
-        id: block.id,
-        name: `${char.name}: "${block.text.substring(0, 30)}..."`,
-        startTime: block.startTime,
-        duration: block.duration,
+      clips: charPresence.map(p => ({
+        id: p.id,
+        name: char.name,
+        startTime: p.startTime,
+        duration: p.duration,
         color: char.color,
-        blockId: block.id,
+        presenceId: p.id,
       })),
     };
   });
 
-  // 2. Keep user tracks (video & audio tracks), but sync any clips that have a blockId!
-  const userTracks = (state.tracks || []).filter(t => t.type === 'video' || t.type === 'audio');
+  // 2. Keep user tracks (video, audio, & broll tracks), but sync any clips that have a blockId!
+  const userTracks = (state.tracks || []).filter(t => t.type === 'video' || t.type === 'audio' || t.type === 'broll');
   
   const syncedUserTracks = userTracks.map(track => {
     return {
@@ -1061,31 +1512,26 @@ function generateTracksFromBlocks(blocks, characters, state) {
   }
 
   // Generate/sync Captions track
-  let captionsTrack = (state.tracks || []).find(t => t.id === 'track_captions');
-  if (!captionsTrack) {
-    captionsTrack = {
-      id: 'track_captions',
-      name: 'Captions',
-      type: 'captions',
-      color: '#ffd21e',
-      clips: [{
-        id: 'clip_captions',
-        name: 'Caption Layer (Reorder in timeline)',
-        startTime: 0,
-        duration: state.totalDuration || 30,
-        color: '#ffd21e',
-        type: 'captions',
-      }]
+  const captionsClips = blocks.map(block => {
+    const char = characters.find(c => c.id === block.characterId);
+    return {
+      id: `caption_${block.id}`,
+      name: `${char ? char.name : 'Speaker'}: "${block.text.substring(0, 20)}..."`,
+      startTime: block.startTime,
+      duration: block.duration,
+      color: char ? char.color : '#ffd21e',
+      blockId: block.id,
+      type: 'caption',
     };
-  } else {
-    captionsTrack = {
-      ...captionsTrack,
-      clips: [{
-        ...captionsTrack.clips[0],
-        duration: state.totalDuration || 30,
-      }]
-    };
-  }
+  });
+
+  const captionsTrack = {
+    id: 'track_captions',
+    name: 'Captions',
+    type: 'captions',
+    color: '#ffd21e',
+    clips: captionsClips,
+  };
 
   // Combined tracks
   const combined = [captionsTrack, ...charTracks, ...syncedUserTracks];
@@ -1300,6 +1746,10 @@ export function ProjectProvider({ children }) {
       dispatch({ type: ActionTypes.REDO });
     }, []),
 
+    jumpToHistoryState: useCallback((index) => {
+      dispatch({ type: ActionTypes.JUMP_TO_HISTORY_STATE, payload: index });
+    }, []),
+
     startDragHistory: useCallback(() => {
       dispatch({ type: ActionTypes.START_DRAG_HISTORY });
     }, []),
@@ -1338,6 +1788,34 @@ export function ProjectProvider({ children }) {
 
     deleteAllVoiceClipsFromLibrary: useCallback(() => {
       dispatch({ type: ActionTypes.DELETE_ALL_VOICES_FROM_LIBRARY });
+    }, []),
+
+    resetCharacterTransform: useCallback((characterId) => {
+      dispatch({ type: ActionTypes.RESET_CHARACTER_TRANSFORM, payload: characterId });
+    }, []),
+
+    resetCharacterKeyframes: useCallback((characterId) => {
+      dispatch({ type: ActionTypes.RESET_CHARACTER_KEYFRAMES, payload: characterId });
+    }, []),
+
+    setClipLock: useCallback((blockId, locked) => {
+      dispatch({ type: ActionTypes.SET_CLIP_LOCK, payload: { blockId, locked } });
+    }, []),
+
+    resetTimeline: useCallback(() => {
+      dispatch({ type: ActionTypes.RESET_TIMELINE });
+    }, []),
+
+    moveClipToTrack: useCallback((clipId, fromTrackId, toTrackId) => {
+      dispatch({ type: ActionTypes.MOVE_CLIP_TO_TRACK, payload: { clipId, fromTrackId, toTrackId } });
+    }, []),
+
+    extractAudio: useCallback((videoTrackId, clipId) => {
+      dispatch({ type: ActionTypes.EXTRACT_AUDIO, payload: { videoTrackId, clipId } });
+    }, []),
+
+    setBrollLayout: useCallback((layout) => {
+      dispatch({ type: ActionTypes.SET_BROLL_LAYOUT, payload: { layout } });
     }, []),
   };
 

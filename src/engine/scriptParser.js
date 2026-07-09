@@ -246,19 +246,36 @@ export function matchBlocksToSegments(blocks, segments) {
 
 /**
  * Recalculate block positions after a change.
- * When a block's duration changes, apply delta offset to all subsequent blocks.
+ * When a block's duration or start time changes, apply delta offset to all subsequent blocks.
  */
-export function recalculateTimings(blocks, changedIndex) {
+export function recalculateTimings(blocks, changedIndex, oldBlock) {
   const updatedBlocks = [...blocks];
   
   if (changedIndex < 0 || changedIndex >= updatedBlocks.length) return updatedBlocks;
   
-  for (let i = changedIndex + 1; i < updatedBlocks.length; i++) {
-    const prevBlock = updatedBlocks[i - 1];
-    updatedBlocks[i] = {
-      ...updatedBlocks[i],
-      startTime: prevBlock.startTime + prevBlock.duration,
-    };
+  if (!oldBlock) {
+    for (let i = changedIndex + 1; i < updatedBlocks.length; i++) {
+      const prevBlock = updatedBlocks[i - 1];
+      updatedBlocks[i] = {
+        ...updatedBlocks[i],
+        startTime: prevBlock.startTime + prevBlock.duration,
+      };
+    }
+    return updatedBlocks;
+  }
+
+  const oldEndTime = oldBlock.startTime + oldBlock.duration;
+  const currentBlock = updatedBlocks[changedIndex];
+  const newEndTime = currentBlock.startTime + currentBlock.duration;
+  const delta = newEndTime - oldEndTime;
+
+  if (delta !== 0) {
+    for (let i = changedIndex + 1; i < updatedBlocks.length; i++) {
+      updatedBlocks[i] = {
+        ...updatedBlocks[i],
+        startTime: updatedBlocks[i].startTime + delta,
+      };
+    }
   }
   
   return updatedBlocks;

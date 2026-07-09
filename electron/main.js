@@ -167,12 +167,19 @@ app.on('activate', () => {
 // ─── IPC Handlers ───────────────────────────────────────────
 
 // Window controls
-ipcMain.on('window-minimize', () => mainWindow?.minimize());
-ipcMain.on('window-maximize', () => {
-  if (mainWindow?.isMaximized()) mainWindow.unmaximize();
-  else mainWindow?.maximize();
+ipcMain.on('window-minimize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  win?.minimize();
 });
-ipcMain.on('window-close', () => mainWindow?.close());
+ipcMain.on('window-maximize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win?.isMaximized()) win.unmaximize();
+  else win?.maximize();
+});
+ipcMain.on('window-close', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  win?.close();
+});
 
 // GPU Settings
 ipcMain.handle('set-gpu-acceleration', async (event, enabled) => {
@@ -609,6 +616,40 @@ function stopPythonServer() {
 }
 
 let voiceCloneWindow = null;
+let settingsWindow = null;
+
+function createSettingsWindow() {
+  if (settingsWindow) {
+    settingsWindow.focus();
+    return;
+  }
+
+  settingsWindow = new BrowserWindow({
+    width: 480,
+    height: 520,
+    parent: mainWindow,
+    modal: false,
+    backgroundColor: '#0a0a0f',
+    title: 'Project Settings',
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false,
+    },
+  });
+
+  if (isDev) {
+    settingsWindow.loadURL('http://localhost:5173/#/settings');
+  } else {
+    settingsWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), { hash: '/settings' });
+  }
+
+  settingsWindow.on('closed', () => {
+    settingsWindow = null;
+  });
+}
 
 function createVoiceCloneWindow() {
   if (voiceCloneWindow) {
@@ -652,7 +693,35 @@ ipcMain.on('open-voice-clone-window', () => {
   }
 });
 
+ipcMain.on('open-settings-window', () => {
+  if (settingsWindow) {
+    settingsWindow.focus();
+  } else {
+    createSettingsWindow();
+  }
+});
+
 let activeProjectState = null;
+let activeSettingsState = null;
+
+ipcMain.handle('set-active-settings-state', (event, state) => {
+  activeSettingsState = state;
+  return { success: true };
+});
+
+ipcMain.handle('get-active-settings-state', () => {
+  return activeSettingsState;
+});
+
+ipcMain.handle('apply-project-settings', async (event, payload) => {
+  if (mainWindow) {
+    mainWindow.webContents.send('project-settings-updated', payload);
+  }
+  if (settingsWindow) {
+    settingsWindow.close();
+  }
+  return { success: true };
+});
 
 ipcMain.handle('set-active-project-state', (event, state) => {
   activeProjectState = state;

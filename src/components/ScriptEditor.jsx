@@ -7,7 +7,7 @@ import { getInterpolatedKeyframeTransform } from '../engine/animationEngine';
  * Features: Raw Script parsing, Dialogue Blocks list, and an Inspector Tab
  * to configure text styling options and character animations.
  */
-export default function ScriptEditor() {
+export default function ScriptEditor({ onMinimize }) {
   const { state, actions } = useProject();
   const [activeTab, setActiveTab] = useState('script'); // 'script' | 'dialogue' | 'animations' | 'inspector'
   const [editingKeyword, setEditingKeyword] = useState(null);
@@ -325,6 +325,204 @@ export default function ScriptEditor() {
     }
   };
 
+  const renderPngInspector = (selectedChar) => {
+    const glowEnabled = selectedChar.pngGlowEnabled ?? false;
+    const shadowEnabled = selectedChar.pngShadowEnabled ?? false;
+
+    return (
+      <div className="inspector-panel">
+        <div className="inspector-header">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style={{ color: selectedChar.color }}>
+            <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+          </svg>
+          <span className="inspector-title">PNG Inspector: {selectedChar.name}</span>
+        </div>
+
+        <div className="inspector-section">
+          <div className="form-row">
+            <div className="form-group" style={{ flex: 2 }}>
+              <label className="form-label">Character Name</label>
+              <input
+                type="text"
+                className="form-input"
+                value={selectedChar.name}
+                onChange={(e) => actions.updateCharacter(selectedChar.id, { name: e.target.value })}
+              />
+            </div>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label className="form-label">Color Theme</label>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  type="color"
+                  className="form-color-picker"
+                  value={selectedChar.color}
+                  onChange={(e) => actions.updateCharacter(selectedChar.id, { color: e.target.value })}
+                />
+                <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)' }}>{selectedChar.color}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label className="form-label">Avatar Asset (Drag image here)</label>
+            <div
+              className="inspector-avatar-drop"
+              onClick={() => handleAssignAsset(selectedChar.id)}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+              onDrop={(e) => {
+                e.preventDefault();
+                try {
+                  const dataStr = e.dataTransfer.getData('application/json');
+                  if (!dataStr) return;
+                  const dragData = JSON.parse(dataStr);
+                  const item = state.mediaItems.find(m => m.id === dragData.id) || dragData;
+                  if (item.type === 'image') {
+                    actions.assignCharacterAsset(selectedChar.id, item);
+                    actions.addToast(`Assigned ${item.name}`, 'success');
+                  }
+                } catch (err) {}
+              }}
+            >
+              {selectedChar.asset ? (
+                <>
+                  <img src={selectedChar.asset.dataUrl} alt="" className="avatar-preview" />
+                  <span className="avatar-label truncate">{selectedChar.asset.name}</span>
+                </>
+              ) : (
+                <span className="avatar-placeholder" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                  Click or drop PNG asset here
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="inspector-section-title">PNG Outer Glow Effect</div>
+        <div className="inspector-section">
+          <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 8 }}>
+            <input
+              type="checkbox"
+              id="pngGlowEnabled"
+              checked={glowEnabled}
+              onChange={(e) => actions.updateCharacter(selectedChar.id, { pngGlowEnabled: e.target.checked })}
+              style={{ cursor: 'pointer' }}
+            />
+            <label htmlFor="pngGlowEnabled" className="form-label" style={{ margin: 0, cursor: 'pointer' }}>Enable Outer Glow</label>
+          </div>
+
+          {glowEnabled && (
+            <>
+              <div className="form-group" style={{ marginTop: 8 }}>
+                <label className="form-label">Glow Color</label>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    type="color"
+                    className="form-color-picker"
+                    value={selectedChar.pngGlowColor || '#00e5ff'}
+                    onChange={(e) => actions.updateCharacter(selectedChar.id, { pngGlowColor: e.target.value })}
+                  />
+                  <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)' }}>{selectedChar.pngGlowColor || '#00e5ff'}</span>
+                </div>
+              </div>
+
+              <div className="form-row-slider" style={{ marginTop: 8 }}>
+                <div className="slider-header">
+                  <span>Glow Size / Blur</span>
+                  <span>{selectedChar.pngGlowSize ?? 15}px</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="50"
+                  value={selectedChar.pngGlowSize ?? 15}
+                  onChange={(e) => actions.updateCharacter(selectedChar.id, { pngGlowSize: parseInt(e.target.value) })}
+                />
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="inspector-section-title">PNG Drop Shadow Effect</div>
+        <div className="inspector-section">
+          <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 8 }}>
+            <input
+              type="checkbox"
+              id="pngShadowEnabled"
+              checked={shadowEnabled}
+              onChange={(e) => actions.updateCharacter(selectedChar.id, { pngShadowEnabled: e.target.checked })}
+              style={{ cursor: 'pointer' }}
+            />
+            <label htmlFor="pngShadowEnabled" className="form-label" style={{ margin: 0, cursor: 'pointer' }}>Enable Drop Shadow</label>
+          </div>
+
+          {shadowEnabled && (
+            <>
+              <div className="form-group" style={{ marginTop: 8 }}>
+                <label className="form-label">Shadow Color</label>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    type="color"
+                    className="form-color-picker"
+                    value={selectedChar.pngShadowColor || '#000000'}
+                    onChange={(e) => actions.updateCharacter(selectedChar.id, { pngShadowColor: e.target.value })}
+                  />
+                  <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)' }}>{selectedChar.pngShadowColor || '#000000'}</span>
+                </div>
+              </div>
+
+              <div className="form-row-slider" style={{ marginTop: 8 }}>
+                <div className="slider-header">
+                  <span>Shadow Blur</span>
+                  <span>{selectedChar.pngShadowBlur ?? 10}px</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="50"
+                  value={selectedChar.pngShadowBlur ?? 10}
+                  onChange={(e) => actions.updateCharacter(selectedChar.id, { pngShadowBlur: parseInt(e.target.value) })}
+                />
+              </div>
+
+              <div className="form-row-slider" style={{ marginTop: 8 }}>
+                <div className="slider-header">
+                  <span>Offset X</span>
+                  <span>{selectedChar.pngShadowOffsetX ?? 5}px</span>
+                </div>
+                <input
+                  type="range"
+                  min="-50"
+                  max="50"
+                  value={selectedChar.pngShadowOffsetX ?? 5}
+                  onChange={(e) => actions.updateCharacter(selectedChar.id, { pngShadowOffsetX: parseInt(e.target.value) })}
+                />
+              </div>
+
+              <div className="form-row-slider" style={{ marginTop: 8 }}>
+                <div className="slider-header">
+                  <span>Offset Y</span>
+                  <span>{selectedChar.pngShadowOffsetY ?? 5}px</span>
+                </div>
+                <input
+                  type="range"
+                  min="-50"
+                  max="50"
+                  value={selectedChar.pngShadowOffsetY ?? 5}
+                  onChange={(e) => actions.updateCharacter(selectedChar.id, { pngShadowOffsetY: parseInt(e.target.value) })}
+                />
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={{ padding: 12, textAlign: 'center', fontSize: 'var(--text-xs)', color: 'var(--text-disabled)', background: 'var(--surface-2)', borderRadius: 6, margin: 12 }}>
+          💡 To edit caption fonts, colors, and layout, select the captions overlay directly in the video preview panel.
+        </div>
+      </div>
+    );
+  };
+
   // Render Inspector Panel based on what is selected
   const renderInspector = () => {
     // 1. Check if Character or Caption is selected
@@ -342,6 +540,9 @@ export default function ScriptEditor() {
     }
 
     if (selectedChar) {
+      if (!isCaption) {
+        return renderPngInspector(selectedChar);
+      }
       const selectedBlock = state.dialogueBlocks.find(b => b.id === state.selectedClipId);
       const style = {
         ...getCharacterStyle(selectedChar),
@@ -1186,6 +1387,30 @@ export default function ScriptEditor() {
               <div style={{ display: 'flex', gap: 4 }}>
                 <button
                   className="btn btn--secondary"
+                  style={{
+                    padding: '2px 6px',
+                    fontSize: '10px',
+                    height: 20,
+                    color: 'var(--accent-danger, #ff4081)',
+                    fontWeight: 'bold',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 2,
+                    marginRight: 8
+                  }}
+                  onClick={() => {
+                    if (confirm('Are you sure you want to reset and delete ALL keyframe animation points for this character?')) {
+                      actions.resetCharacterKeyframes(character.id);
+                      actions.addToast('Cleared all keyframe points', 'info');
+                    }
+                  }}
+                  title="Delete all keyframes for this character"
+                >
+                  <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                  Reset Keyframes
+                </button>
+                <button
+                  className="btn btn--secondary"
                   style={{ padding: '2px 6px', fontSize: '10px', height: 20 }}
                   onClick={handleJumpPrevKeyframe}
                   title="Jump to previous keyframe"
@@ -1566,43 +1791,70 @@ export default function ScriptEditor() {
     <div className="script-panel panel">
       {/* Tab headers */}
       <div className="panel__header" style={{ padding: 0 }}>
-        <div className="editor-tabs" style={{ width: '100%' }}>
-          <button
-            className={`editor-tab ${activeTab === 'script' ? 'editor-tab--active' : ''}`}
-            onClick={() => setActiveTab('script')}
-          >
-            Script
-          </button>
-          <button
-            className={`editor-tab ${activeTab === 'dialogue' ? 'editor-tab--active' : ''}`}
-            onClick={() => setActiveTab('dialogue')}
-          >
-            Blocks
-          </button>
-          <button
-            className={`editor-tab ${activeTab === 'animations' ? 'editor-tab--active' : ''}`}
-            onClick={() => setActiveTab('animations')}
-          >
-            Animations
-          </button>
-          <button
-            className={`editor-tab ${activeTab === 'inspector' ? 'editor-tab--active' : ''}`}
-            onClick={() => setActiveTab('inspector')}
-          >
-            Inspector
-          </button>
+        <div className="editor-tabs" style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', height: '100%' }}>
+            <button
+              className={`editor-tab ${activeTab === 'script' ? 'editor-tab--active' : ''}`}
+              onClick={() => setActiveTab('script')}
+            >
+              Script
+            </button>
+            <button
+              className={`editor-tab ${activeTab === 'dialogue' ? 'editor-tab--active' : ''}`}
+              onClick={() => setActiveTab('dialogue')}
+            >
+              Blocks
+            </button>
+            <button
+              className={`editor-tab ${activeTab === 'animations' ? 'editor-tab--active' : ''}`}
+              onClick={() => setActiveTab('animations')}
+            >
+              Animations
+            </button>
+            <button
+              className={`editor-tab ${activeTab === 'inspector' ? 'editor-tab--active' : ''}`}
+              onClick={() => setActiveTab('inspector')}
+            >
+              Inspector
+            </button>
+          </div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 8, height: '100%' }}>
+            {activeTab === 'script' && (
+              <button
+                className="panel__action-btn"
+                onClick={loadSampleScript}
+                title="Load Demo Script"
+                style={{ fontSize: '11px', width: 'auto', padding: '0 8px', height: 22, border: '1px solid var(--border-default)' }}
+              >
+                Demo
+              </button>
+            )}
+            {onMinimize && (
+              <button
+                onClick={onMinimize}
+                style={{
+                  height: '100%',
+                  padding: '0 10px',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-tertiary)',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s'
+                }}
+                title="Minimize Script Editor"
+                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-primary)'; e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-tertiary)'; e.currentTarget.style.background = 'none'; }}
+              >
+                ▶
+              </button>
+            )}
+          </div>
         </div>
-        
-        {activeTab === 'script' && (
-          <button
-            className="panel__action-btn"
-            onClick={loadSampleScript}
-            title="Load Demo Script"
-            style={{ fontSize: '11px', width: 'auto', padding: '0 8px', margin: '5px 8px 5px 0', border: '1px solid var(--border-default)' }}
-          >
-            Demo
-          </button>
-        )}
       </div>
 
       <div className="script-panel__content">
@@ -1671,6 +1923,33 @@ export default function ScriptEditor() {
                     {char.name}
                   </span>
                 )}
+                <button
+                  style={{
+                    width: 20,
+                    height: 20,
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-disabled)',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'color 0.2s',
+                  }}
+                  onMouseEnter={(e) => e.target.style.color = '#ff4081'}
+                  onMouseLeave={(e) => e.target.style.color = 'var(--text-disabled)'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm(`Are you sure you want to remove character "${char.name}"?`)) {
+                      actions.removeCharacter(char.id);
+                      actions.addToast(`Removed character: ${char.name}`, 'info');
+                    }
+                  }}
+                  title="Remove Character"
+                >
+                  &times;
+                </button>
                 {char.asset ? (
                   <img
                     className="keyword-item__avatar"
@@ -1810,24 +2089,28 @@ export default function ScriptEditor() {
                     </div>
                     <div className="dialogue-block__text">{block.text}</div>
                     <div className="dialogue-block__timing">
-                      <span>Start:</span>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        value={block.startTime.toFixed(1)}
-                        onChange={(e) => handleBlockTimingChange(block.id, 'startTime', e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                      <span>Dur:</span>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0.1"
-                        value={block.duration.toFixed(1)}
-                        onChange={(e) => handleBlockTimingChange(block.id, 'duration', e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
+                      <div className="dialogue-block__timing-group">
+                        <span>Start:</span>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          value={block.startTime.toFixed(1)}
+                          onChange={(e) => handleBlockTimingChange(block.id, 'startTime', e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </div>
+                      <div className="dialogue-block__timing-group">
+                        <span>Dur:</span>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0.1"
+                          value={block.duration.toFixed(1)}
+                          onChange={(e) => handleBlockTimingChange(block.id, 'duration', e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </div>
                       <span style={{ marginLeft: 'auto' }}>
                         {formatTime(block.startTime)}
                       </span>
