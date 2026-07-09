@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useProject } from '../store/ProjectContext';
+import { getMediaType, readFileAsDataUrl } from '../utils/fileHelpers';
 
 const getVideoDuration = (dataUrl) => {
   return new Promise((resolve) => {
@@ -577,20 +578,3 @@ export default function MediaLibrary({ onMinimize }) {
   );
 }
 
-function getMediaType(ext) {
-  const videoExts = ['.mp4', '.webm', '.avi', '.mov', '.mkv'];
-  const audioExts = ['.mp3', '.wav', '.ogg'];
-  const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
-  if (videoExts.includes(ext)) return 'video';
-  if (audioExts.includes(ext)) return 'audio';
-  if (imageExts.includes(ext)) return 'image';
-  return 'unknown';
-}
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target.result);
-    reader.readAsDataURL(file);
-  });
-}

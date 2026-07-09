@@ -41,13 +41,16 @@ const initialState = {
   // Background video
   backgroundVideo: null, // { name, path, dataUrl, duration }
   
-  // B-Roll Overlay
   brollLayout: 'none', // 'none' | 'split' | 'pip'
+  brollX: 50,
+  brollY: 20,
+  brollWidth: 80,
+  brollHeight: 25,
+  brollAspectRatio: 'custom',
   
   // Export
   isExporting: false,
   exportProgress: 0,
-  showProjectSettingsModal: false,
   exportSettings: {
     width: 1080,
     height: 1920,
@@ -58,7 +61,6 @@ const initialState = {
   
   // UI state
   activeTool: 'select', // 'select' | 'cut' | 'hand'
-  activePanel: 'script', // 'script' | 'media' | 'export'
   showExportModal: false,
   toasts: [],
   
@@ -108,9 +110,7 @@ const ActionTypes = {
   SELECT_KEYFRAME: 'SELECT_KEYFRAME',
   
   SET_ACTIVE_TOOL: 'SET_ACTIVE_TOOL',
-  SET_ACTIVE_PANEL: 'SET_ACTIVE_PANEL',
   SET_SHOW_EXPORT_MODAL: 'SET_SHOW_EXPORT_MODAL',
-  SET_SHOW_PROJECT_SETTINGS_MODAL: 'SET_SHOW_PROJECT_SETTINGS_MODAL',
   SET_PROJECT_RESOLUTION: 'SET_PROJECT_RESOLUTION',
   SPLIT_CLIP: 'SPLIT_CLIP',
   SET_EXPORT_SETTINGS: 'SET_EXPORT_SETTINGS',
@@ -148,6 +148,7 @@ const ActionTypes = {
   MOVE_CLIP_TO_TRACK: 'MOVE_CLIP_TO_TRACK',
   EXTRACT_AUDIO: 'EXTRACT_AUDIO',
   SET_BROLL_LAYOUT: 'SET_BROLL_LAYOUT',
+  SET_BROLL_SETTINGS: 'SET_BROLL_SETTINGS',
 };
 
 // ─── Helpers ───
@@ -630,14 +631,8 @@ function coreProjectReducer(state, action) {
     case ActionTypes.SET_ACTIVE_TOOL:
       return { ...state, activeTool: action.payload };
     
-    case ActionTypes.SET_ACTIVE_PANEL:
-      return { ...state, activePanel: action.payload };
-    
     case ActionTypes.SET_SHOW_EXPORT_MODAL:
       return { ...state, showExportModal: action.payload };
-
-    case ActionTypes.SET_SHOW_PROJECT_SETTINGS_MODAL:
-      return { ...state, showProjectSettingsModal: action.payload };
 
     case ActionTypes.SET_PROJECT_RESOLUTION: {
       const { width, height } = action.payload;
@@ -1142,6 +1137,18 @@ function coreProjectReducer(state, action) {
       };
     }
 
+    case ActionTypes.SET_BROLL_SETTINGS: {
+      const { x, y, width, height, aspectRatio } = action.payload;
+      return {
+        ...state,
+        brollX: x,
+        brollY: y,
+        brollWidth: width,
+        brollHeight: height,
+        brollAspectRatio: aspectRatio,
+      };
+    }
+
     case ActionTypes.DELETE_ALL_VOICES_FROM_LIBRARY: {
       const mediaItems = state.mediaItems.filter(item => !item.isVoiceClone);
       return {
@@ -1188,6 +1195,7 @@ const UNDOABLE_ACTIONS = new Set([
   'MOVE_CLIP_TO_TRACK',
   'EXTRACT_AUDIO',
   'SET_BROLL_LAYOUT',
+  'SET_BROLL_SETTINGS',
 ]);
 
 function getHumanReadableActionName(actionType) {
@@ -1229,6 +1237,7 @@ function getHumanReadableActionName(actionType) {
     MOVE_CLIP_TO_TRACK: 'Move Clip to Track',
     EXTRACT_AUDIO: 'Extract Audio from Video',
     SET_BROLL_LAYOUT: 'Change B-Roll Layout',
+    SET_BROLL_SETTINGS: 'Change B-Roll Settings',
   };
   return map[actionType] || actionType;
 }
@@ -1247,8 +1256,12 @@ function getProjectSnapshot(state) {
     backgroundVideo: state.backgroundVideo,
     voiceConfigs: state.voiceConfigs,
     lastActionLabel: state.lastActionLabel || 'Open Project',
-    characterPresenceClips: state.characterPresenceClips || [],
     brollLayout: state.brollLayout || 'none',
+    brollX: state.brollX,
+    brollY: state.brollY,
+    brollWidth: state.brollWidth,
+    brollHeight: state.brollHeight,
+    brollAspectRatio: state.brollAspectRatio,
   };
 }
 
@@ -1654,16 +1667,8 @@ export function ProjectProvider({ children }) {
       dispatch({ type: ActionTypes.SET_ACTIVE_TOOL, payload: tool });
     }, []),
     
-    setActivePanel: useCallback((panel) => {
-      dispatch({ type: ActionTypes.SET_ACTIVE_PANEL, payload: panel });
-    }, []),
-    
     setShowExportModal: useCallback((show) => {
       dispatch({ type: ActionTypes.SET_SHOW_EXPORT_MODAL, payload: show });
-    }, []),
-
-    setShowProjectSettingsModal: useCallback((show) => {
-      dispatch({ type: ActionTypes.SET_SHOW_PROJECT_SETTINGS_MODAL, payload: show });
     }, []),
 
     setProjectResolution: useCallback((width, height) => {
@@ -1816,6 +1821,10 @@ export function ProjectProvider({ children }) {
 
     setBrollLayout: useCallback((layout) => {
       dispatch({ type: ActionTypes.SET_BROLL_LAYOUT, payload: { layout } });
+    }, []),
+
+    setBrollSettings: useCallback((settings) => {
+      dispatch({ type: ActionTypes.SET_BROLL_SETTINGS, payload: settings });
     }, []),
   };
 

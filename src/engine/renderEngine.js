@@ -262,10 +262,26 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
         drawW = width;
         drawH = height * 0.45;
       } else if (state.brollLayout === 'pip') {
-        drawW = width * 0.8;
-        drawH = height * 0.25;
-        drawX = (width - drawW) / 2;
-        drawY = height * 0.06;
+        const bX = state.brollX !== undefined ? state.brollX : 50;
+        const bY = state.brollY !== undefined ? state.brollY : 20;
+        const bW = state.brollWidth !== undefined ? state.brollWidth : 80;
+        const bH = state.brollHeight !== undefined ? state.brollHeight : 25;
+
+        drawW = width * (bW / 100);
+        drawH = height * (bH / 100);
+        drawX = (width * (bX / 100)) - (drawW / 2);
+        drawY = (height * (bY / 100)) - (drawH / 2);
+        isPip = true;
+      } else if (state.brollLayout === 'custom') {
+        const bX = state.brollX !== undefined ? state.brollX : 50;
+        const bY = state.brollY !== undefined ? state.brollY : 20;
+        const bW = state.brollWidth !== undefined ? state.brollWidth : 80;
+        const bH = state.brollHeight !== undefined ? state.brollHeight : 25;
+
+        drawW = width * (bW / 100);
+        drawH = height * (bH / 100);
+        drawX = (width * (bX / 100)) - (drawW / 2);
+        drawY = (height * (bY / 100)) - (drawH / 2);
         isPip = true;
       }
 

@@ -131,17 +131,6 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 
-  mainWindow.webContents.on('did-finish-load', () => {
-    setTimeout(async () => {
-      try {
-        const html = await mainWindow.webContents.executeJavaScript("document.getElementById('root').innerHTML");
-        console.log(`[DOM Check] root innerHTML: ${html}`);
-      } catch (err) {
-        console.error(`[DOM Check] Error executing JS:`, err);
-      }
-    }, 5000);
-  });
-
   mainWindow.on('closed', () => {
     mainWindow = null;
   });

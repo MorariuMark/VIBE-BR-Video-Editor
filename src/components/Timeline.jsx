@@ -1,5 +1,6 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useProject } from '../store/ProjectContext';
+import { formatTime } from '../utils/fileHelpers';
 
 /**
  * Multi-track Timeline Panel
@@ -1108,12 +1109,6 @@ function AudioWaveformCanvas({ audioBuffer, width, height, color }) {
   }, [audioBuffer, width, height, color]);
 
   return <canvas ref={canvasRef} style={{ width: '100%', height: '100%' }} />;
-}
-
-function formatTime(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 function HoverMenuItem({ text, onClick, color }) {

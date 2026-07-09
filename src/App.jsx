@@ -251,12 +251,19 @@ function AppContent() {
 
     if (window.electronAPI && window.electronAPI.onProjectSettingsUpdated) {
       window.electronAPI.onProjectSettingsUpdated((payload) => {
-        const { width, height, fps, brollLayout } = payload;
+        const { width, height, fps, brollLayout, brollX, brollY, brollWidth, brollHeight, brollAspectRatio } = payload;
         actions.setProjectResolution(width, height);
         actions.setExportSettings({ fps });
         if (brollLayout) {
           actions.setBrollLayout(brollLayout);
         }
+        actions.setBrollSettings({
+          x: brollX !== undefined ? brollX : 50,
+          y: brollY !== undefined ? brollY : 20,
+          width: brollWidth !== undefined ? brollWidth : 80,
+          height: brollHeight !== undefined ? brollHeight : 25,
+          aspectRatio: brollAspectRatio || 'custom'
+        });
         actions.addToast('Project settings updated', 'success');
       });
     }
@@ -269,7 +276,7 @@ function AppContent() {
         window.electronAPI.removeProjectSettingsUpdated();
       }
     };
-  }, [actions]);
+  }, [actions, state.mediaItems]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>

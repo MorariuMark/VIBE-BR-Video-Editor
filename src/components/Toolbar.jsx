@@ -1,5 +1,6 @@
 import React from 'react';
 import { useProject } from '../store/ProjectContext';
+import { getMediaType, readFileAsDataUrl } from '../utils/fileHelpers';
 
 /**
  * Main toolbar with editing tools and action buttons
@@ -58,21 +59,11 @@ export default function Toolbar() {
         case 'v': actions.setActiveTool('select'); break;
         case 'c': actions.setActiveTool('cut'); break;
         case 'h': actions.setActiveTool('hand'); break;
-        case ' ':
-          e.preventDefault();
-          actions.setPlaying(!state.isPlaying);
-          break;
-        case 'delete':
-        case 'backspace':
-          if (state.selectedClipId) {
-            // Handle clip deletion
-          }
-          break;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [state.isPlaying, state.selectedClipId]);
+  }, []);
 
   const handleImport = async () => {
     if (window.electronAPI) {
@@ -171,10 +162,15 @@ export default function Toolbar() {
         canvasHeight: state.canvasHeight,
         fps: state.exportSettings?.fps || 60,
         brollLayout: state.brollLayout || 'none',
+        brollX: state.brollX !== undefined ? state.brollX : 50,
+        brollY: state.brollY !== undefined ? state.brollY : 20,
+        brollWidth: state.brollWidth !== undefined ? state.brollWidth : 80,
+        brollHeight: state.brollHeight !== undefined ? state.brollHeight : 25,
+        brollAspectRatio: state.brollAspectRatio || 'custom',
       });
       window.electronAPI.openSettingsWindow();
     } else {
-      actions.setShowProjectSettingsModal(true);
+      alert("Settings window is only available in the desktop application.");
     }
   };
 
@@ -319,20 +315,3 @@ export default function Toolbar() {
   );
 }
 
-function getMediaType(ext) {
-  const videoExts = ['.mp4', '.webm', '.avi', '.mov', '.mkv'];
-  const audioExts = ['.mp3', '.wav', '.ogg'];
-  const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
-  if (videoExts.includes(ext)) return 'video';
-  if (audioExts.includes(ext)) return 'audio';
-  if (imageExts.includes(ext)) return 'image';
-  return 'unknown';
-}
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target.result);
-    reader.readAsDataURL(file);
-  });
-}

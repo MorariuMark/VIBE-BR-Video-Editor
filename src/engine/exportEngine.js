@@ -194,26 +194,6 @@ function escapeFFmpegText(text) {
     .replace(/\\/g, ''); // remove backslashes
 }
 
-/**
- * Generate a simpler export command for canvas-based rendering.
- * This creates a sequence of frames that can be encoded by FFmpeg.
- */
-export function generateCanvasExportConfig(config) {
-  const {
-    width = 1080,
-    height = 1920,
-    fps = 60,
-    duration = 30,
-  } = config;
-
-  return {
-    width,
-    height,
-    fps,
-    totalFrames: Math.ceil(duration * fps),
-    frameDuration: 1 / fps,
-  };
-}
 
 /**
  * Export settings presets

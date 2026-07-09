@@ -295,5 +295,3 @@ export function addCustomCharacter(existingCharacters, name) {
     textStyle: { ...DEFAULT_TEXT_STYLE },
   };
 }
-
-export { TRACK_COLORS };

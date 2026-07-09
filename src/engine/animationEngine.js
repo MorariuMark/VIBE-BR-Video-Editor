@@ -348,7 +348,7 @@ export function getAnimatedTransform(block, element, currentTime) {
 /**
  * Check if a character should be visible at the given time.
  */
-export function isBlockActive(block, currentTime) {
+function isBlockActive(block, currentTime) {
   return currentTime >= block.startTime && currentTime <= (block.startTime + block.duration);
 }
 

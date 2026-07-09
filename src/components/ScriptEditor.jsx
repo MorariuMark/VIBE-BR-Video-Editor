@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useProject } from '../store/ProjectContext';
 import { getInterpolatedKeyframeTransform } from '../engine/animationEngine';
+import { formatTime, readFileAsDataUrl } from '../utils/fileHelpers';
 
 /**
  * Script Editor & Inspector Panel
@@ -2127,18 +2128,4 @@ export default function ScriptEditor({ onMinimize }) {
       </div>
     </div>
   );
-}
-
-function formatTime(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target.result);
-    reader.readAsDataURL(file);
-  });
 }

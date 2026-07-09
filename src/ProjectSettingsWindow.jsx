@@ -16,6 +16,63 @@ export default function ProjectSettingsWindow() {
   const [aspectRatioLock, setAspectRatioLock] = useState(true);
   const [preset, setPreset] = useState('0'); // vertical portrait index
 
+  const [brollX, setBrollX] = useState(50);
+  const [brollY, setBrollY] = useState(20);
+  const [brollWidth, setBrollWidth] = useState(80);
+  const [brollHeight, setBrollHeight] = useState(25);
+  const [brollAspectRatio, setBrollAspectRatio] = useState('custom');
+
+  const handleBrollWidthChange = (val) => {
+    let newW = parseFloat(val) || 0;
+    newW = Math.max(5, Math.min(100, newW));
+    setBrollWidth(newW);
+
+    if (brollAspectRatio !== 'custom') {
+      let ratio = 16/9;
+      if (brollAspectRatio === '9:16') ratio = 9/16;
+      else if (brollAspectRatio === '1:1') ratio = 1/1;
+      else if (brollAspectRatio === '4:3') ratio = 4/3;
+
+      const wPx = width * (newW / 100);
+      const hPx = wPx / ratio;
+      const hPct = Math.min(100, Math.max(5, (hPx / height) * 100));
+      setBrollHeight(Math.round(hPct * 10) / 10);
+    }
+  };
+
+  const handleBrollHeightChange = (val) => {
+    let newH = parseFloat(val) || 0;
+    newH = Math.max(5, Math.min(100, newH));
+    setBrollHeight(newH);
+
+    if (brollAspectRatio !== 'custom') {
+      let ratio = 16/9;
+      if (brollAspectRatio === '9:16') ratio = 9/16;
+      else if (brollAspectRatio === '1:1') ratio = 1/1;
+      else if (brollAspectRatio === '4:3') ratio = 4/3;
+
+      const hPx = height * (newH / 100);
+      const wPx = hPx * ratio;
+      const wPct = Math.min(100, Math.max(5, (wPx / width) * 100));
+      setBrollWidth(Math.round(wPct * 10) / 10);
+    }
+  };
+
+  const handleBrollAspectRatioChange = (val) => {
+    setBrollAspectRatio(val);
+    if (val !== 'custom') {
+      let ratio = 16/9;
+      if (val === '9:16') ratio = 9/16;
+      else if (val === '1:1') ratio = 1/1;
+      else if (val === '4:3') ratio = 4/3;
+
+      const wPx = width * (brollWidth / 100);
+      const hPx = wPx / ratio;
+      const hPct = Math.min(100, Math.max(5, (hPx / height) * 100));
+      setBrollHeight(Math.round(hPct * 10) / 10);
+    }
+  };
+
   // Theme synchronization from local storage
   useEffect(() => {
     const applyTheme = () => {
@@ -39,6 +96,11 @@ export default function ProjectSettingsWindow() {
           setHeight(initial.canvasHeight || 1920);
           setFps(initial.fps || 60);
           setBrollLayout(initial.brollLayout || 'none');
+          setBrollX(initial.brollX !== undefined ? initial.brollX : 50);
+          setBrollY(initial.brollY !== undefined ? initial.brollY : 20);
+          setBrollWidth(initial.brollWidth !== undefined ? initial.brollWidth : 80);
+          setBrollHeight(initial.brollHeight !== undefined ? initial.brollHeight : 25);
+          setBrollAspectRatio(initial.brollAspectRatio || 'custom');
           
           // Match initial resolution to preset index if possible
           const matchIdx = ASPECT_RATIO_PRESETS.findIndex(p => p.width === initial.canvasWidth && p.height === initial.canvasHeight);
@@ -103,7 +165,12 @@ export default function ProjectSettingsWindow() {
         width,
         height,
         fps,
-        brollLayout
+        brollLayout,
+        brollX,
+        brollY,
+        brollWidth,
+        brollHeight,
+        brollAspectRatio
       });
     }
   };
@@ -211,8 +278,111 @@ export default function ProjectSettingsWindow() {
             <option value="none">None (Disabled)</option>
             <option value="split">Split-Screen (Top)</option>
             <option value="pip">Picture-in-Picture (Top)</option>
+            <option value="custom">Custom Position & Size</option>
           </select>
         </div>
+
+        {brollLayout !== 'none' && (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px',
+            marginTop: '14px',
+            padding: '14px',
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '8px'
+          }}>
+            <h4 style={{ margin: '0 0 4px 0', fontSize: '0.9rem', color: 'var(--accent-primary, #00e5ff)' }}>Second Window Configuration</h4>
+            
+            {/* Aspect Ratio */}
+            <div className="form-group">
+              <label className="form-label" style={{ marginBottom: '6px', display: 'block', fontSize: '11px', color: '#aaa' }}>Aspect Ratio</label>
+              <select
+                className="form-select"
+                value={brollAspectRatio}
+                onChange={(e) => handleBrollAspectRatioChange(e.target.value)}
+                style={{ width: '100%', padding: '6px 10px', background: 'var(--surface-1)', border: '1px solid var(--border-subtle)', borderRadius: '4px', color: '#fff', fontSize: '12px' }}
+              >
+                <option value="custom">Custom (Free Form)</option>
+                <option value="16:9">Widescreen (16:9)</option>
+                <option value="9:16">Portrait (9:16)</option>
+                <option value="1:1">Square (1:1)</option>
+                <option value="4:3">Standard (4:3)</option>
+              </select>
+            </div>
+
+            {/* Width and Height */}
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '11px', color: '#aaa' }}>
+                  <span>Width</span>
+                  <span style={{ color: '#00e5ff', fontWeight: 'bold' }}>{brollWidth}%</span>
+                </label>
+                <input
+                  type="range"
+                  min="5"
+                  max="100"
+                  step="0.5"
+                  value={brollWidth}
+                  onChange={(e) => handleBrollWidthChange(e.target.value)}
+                  style={{ width: '100%', cursor: 'pointer', height: '4px', background: 'var(--surface-2)', borderRadius: '2px', outline: 'none' }}
+                />
+              </div>
+              
+              <div className="form-group" style={{ flex: 1 }}>
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '11px', color: '#aaa' }}>
+                  <span>Height</span>
+                  <span style={{ color: '#00e5ff', fontWeight: 'bold' }}>{brollHeight}%</span>
+                </label>
+                <input
+                  type="range"
+                  min="5"
+                  max="100"
+                  step="0.5"
+                  value={brollHeight}
+                  onChange={(e) => handleBrollHeightChange(e.target.value)}
+                  style={{ width: '100%', cursor: 'pointer', height: '4px', background: 'var(--surface-2)', borderRadius: '2px', outline: 'none' }}
+                />
+              </div>
+            </div>
+
+            {/* Position X and Y */}
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '11px', color: '#aaa' }}>
+                  <span>Position X (Center)</span>
+                  <span style={{ color: '#00e5ff', fontWeight: 'bold' }}>{brollX}%</span>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  value={brollX}
+                  onChange={(e) => setBrollX(parseFloat(e.target.value) || 0)}
+                  style={{ width: '100%', cursor: 'pointer', height: '4px', background: 'var(--surface-2)', borderRadius: '2px', outline: 'none' }}
+                />
+              </div>
+              
+              <div className="form-group" style={{ flex: 1 }}>
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '11px', color: '#aaa' }}>
+                  <span>Position Y (Center)</span>
+                  <span style={{ color: '#00e5ff', fontWeight: 'bold' }}>{brollY}%</span>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  value={brollY}
+                  onChange={(e) => setBrollY(parseFloat(e.target.value) || 0)}
+                  style={{ width: '100%', cursor: 'pointer', height: '4px', background: 'var(--surface-2)', borderRadius: '2px', outline: 'none' }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-subtle)', paddingTop: '16px', marginTop: 'auto' }}>

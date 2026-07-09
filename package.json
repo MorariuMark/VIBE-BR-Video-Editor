@@ -12,8 +12,7 @@
   },
   "dependencies": {
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "uuid": "^9.0.0"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
@@ -25,9 +24,19 @@
   "build": {
     "appId": "com.vibebr.videoeditor",
     "productName": "VIBE-BR-Video Editor",
+    "asar": true,
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "!dist/voices/**",
+      "!dist/voice_temp/**"
+    ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets",
+        "filter": ["**/*"]
+      }
     ]
   }
 }

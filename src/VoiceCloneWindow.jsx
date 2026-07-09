@@ -458,7 +458,6 @@ export default function VoiceCloneWindow() {
     }
   };
 
-  // 5. Play Reference Audio
   // 5. Play Reference Audio (Safely loaded as Blob URL to prevent file:/// scheme load crashes)
   const togglePlayAudio = async (filePath) => {
     if (playingAudio === filePath) {
