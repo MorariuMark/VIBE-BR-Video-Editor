@@ -917,13 +917,48 @@ export default function PreviewCanvas() {
             clickedOverlayTrack = track;
             actions.selectElement(track.id);
             actions.startDragHistory();
-            setDragging({
-              type: 'move',
-              elementId: track.id,
-              startX: x,
-              startY: y,
-              origTransform: transform,
-            });
+
+            if (transformMode === 'rotate3d') {
+              const dx = x - cx;
+              const dy = y - cy;
+              const rotation = transform.rotation || 0;
+              const rad = -rotation * Math.PI / 180;
+              const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+              const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+
+              let lockedAxis = null;
+              const distX = Math.abs(localY);
+              const distY = Math.abs(localX);
+
+              if (distX <= 18 && distY <= 18) {
+                lockedAxis = distX < distY ? 'X' : 'Y';
+              } else if (distX <= 18) {
+                lockedAxis = 'X';
+              } else if (distY <= 18) {
+                lockedAxis = 'Y';
+              }
+
+              if (lockedAxis) {
+                setDragging({
+                  type: 'rotate3d',
+                  elementId: track.id,
+                  startX: x,
+                  startY: y,
+                  origTransform: transform,
+                  lockedAxis,
+                });
+              } else {
+                actions.endDragHistory();
+              }
+            } else {
+              setDragging({
+                type: 'move',
+                elementId: track.id,
+                startX: x,
+                startY: y,
+                origTransform: transform,
+              });
+            }
             break;
           }
         }
@@ -946,52 +981,96 @@ export default function PreviewCanvas() {
     if (!dragging) {
       if (transformMode === 'rotate3d' && state.selectedElementId) {
         const isCaption = state.selectedElementId.startsWith('caption_');
+        const isBroll = state.selectedElementId.includes('broll') || state.selectedElementId === 'broll';
+        const isWindow = state.selectedElementId.includes('window') || state.selectedElementId === 'window';
+        
         if (!isCaption) {
-          const char = state.characters.find(c => c.id === state.selectedElementId);
-          const track = state.tracks.find(t => t.characterId === state.selectedElementId);
-          const activeClip = track?.clips.find(c => state.currentTime >= c.startTime && state.currentTime <= c.startTime + c.duration);
-          if (char && activeClip) {
-            const defaultTransform = state.characterTransforms[char.id] || { x: state.canvasWidth / 2, y: state.canvasHeight * 0.65, scale: 1, rotation: 0 };
-            const baseTransform = char.keyframingEnabled && char.keyframes?.length > 0
-              ? getInterpolatedKeyframeTransform(char.keyframes, state.currentTime)
-              : defaultTransform;
-            const activeBlocks = getActiveBlocks(state.dialogueBlocks, state.currentTime);
-            const block = activeBlocks.find(b => b.characterId === state.selectedElementId);
-            const animTransform = block ? getAnimatedTransform(block, baseTransform, state.currentTime) : baseTransform;
-            if (animTransform) {
-              const cx = animTransform.x * scaleFactor;
-              let cy = animTransform.y * scaleFactor;
-              let w = 640 * animTransform.scale * scaleFactor;
-              let h = 640 * animTransform.scale * scaleFactor;
-              if (state.brollLayout === 'split') {
-                cy = (state.canvasHeight * 0.45 + animTransform.y * 0.55) * scaleFactor;
-                w = w * 0.55;
-                h = h * 0.55;
-              }
-              const rotation = animTransform.rotation || 0;
+          let cx, cy, w, h, rotation = 0;
+          let hasTransform = false;
 
-              const dx = x - cx;
-              const dy = y - cy;
-              const rad = -rotation * Math.PI / 180;
-              const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
-              const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+          if (isBroll || isWindow) {
+            const transform = state.characterTransforms[state.selectedElementId] || {
+              x: state.canvasWidth * 0.5,
+              y: isWindow ? state.canvasHeight * 0.2 : state.canvasHeight * 0.3,
+              scale: isWindow ? 0.9 : 0.8,
+              rotation: 0,
+            };
 
-              let axis = null;
-              const distX = Math.abs(localY);
-              const distY = Math.abs(localX);
-
-              if (Math.abs(localX) <= w / 2 && Math.abs(localY) <= h / 2) {
-                if (distX <= 18 && distY <= 18) {
-                  axis = distX < distY ? 'X' : 'Y';
-                } else if (distX <= 18) {
-                  axis = 'X';
-                } else if (distY <= 18) {
-                  axis = 'Y';
+            let mediaRatio = 16/9;
+            const track = state.tracks.find(t => t.id === state.selectedElementId);
+            if (track) {
+              const activeClip = track.clips.find(c => state.currentTime >= c.startTime && state.currentTime <= c.startTime + c.duration);
+              if (activeClip) {
+                if (activeClip.type === 'video') {
+                  const v = (videoElementsRef.current && videoElementsRef.current[activeClip.id]);
+                  if (v && v.videoWidth) {
+                    mediaRatio = v.videoWidth / v.videoHeight;
+                  }
+                } else if (activeClip.type === 'image') {
+                  const img = loadedImagesRef.current[activeClip.id];
+                  if (img && img.width) {
+                    mediaRatio = img.width / img.height;
+                  }
                 }
               }
-              setHoveredAxis(axis);
-              return;
             }
+
+            cx = transform.x * scaleFactor;
+            cy = transform.y * scaleFactor;
+            w = 640 * transform.scale * scaleFactor;
+            h = (640 / mediaRatio) * transform.scale * scaleFactor;
+            rotation = transform.rotation || 0;
+            hasTransform = true;
+          } else {
+            const char = state.characters.find(c => c.id === state.selectedElementId);
+            const track = state.tracks.find(t => t.characterId === state.selectedElementId);
+            const activeClip = track?.clips.find(c => state.currentTime >= c.startTime && state.currentTime <= c.startTime + c.duration);
+            if (char && activeClip) {
+              const defaultTransform = state.characterTransforms[char.id] || { x: state.canvasWidth / 2, y: state.canvasHeight * 0.65, scale: 1, rotation: 0 };
+              const baseTransform = char.keyframingEnabled && char.keyframes?.length > 0
+                ? getInterpolatedKeyframeTransform(char.keyframes, state.currentTime)
+                : defaultTransform;
+              const activeBlocks = getActiveBlocks(state.dialogueBlocks, state.currentTime);
+              const block = activeBlocks.find(b => b.characterId === state.selectedElementId);
+              const animTransform = block ? getAnimatedTransform(block, baseTransform, state.currentTime) : baseTransform;
+              if (animTransform) {
+                cx = animTransform.x * scaleFactor;
+                cy = animTransform.y * scaleFactor;
+                w = 640 * animTransform.scale * scaleFactor;
+                h = 640 * animTransform.scale * scaleFactor;
+                if (state.brollLayout === 'split') {
+                  cy = (state.canvasHeight * 0.45 + animTransform.y * 0.55) * scaleFactor;
+                  w = w * 0.55;
+                  h = h * 0.55;
+                }
+                rotation = animTransform.rotation || 0;
+                hasTransform = true;
+              }
+            }
+          }
+
+          if (hasTransform) {
+            const dx = x - cx;
+            const dy = y - cy;
+            const rad = -rotation * Math.PI / 180;
+            const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+            const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+
+            let axis = null;
+            const distX = Math.abs(localY);
+            const distY = Math.abs(localX);
+
+            if (Math.abs(localX) <= w / 2 && Math.abs(localY) <= h / 2) {
+              if (distX <= 18 && distY <= 18) {
+                axis = distX < distY ? 'X' : 'Y';
+              } else if (distX <= 18) {
+                axis = 'X';
+              } else if (distY <= 18) {
+                axis = 'Y';
+              }
+            }
+            setHoveredAxis(axis);
+            return;
           }
         }
       }

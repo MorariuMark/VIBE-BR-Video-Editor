@@ -983,19 +983,26 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
     }
     
     if (cx !== undefined && cy !== undefined && w !== undefined && h !== undefined) {
-      // Find rotation for selected element if it is a character
+      // Find rotation for selected element if it is a character or overlay
       let rotation = 0;
       if (!isCaption) {
-        const char = state.characters.find(c => c.id === state.selectedElementId);
-        const block = activeBlocks.find(b => b.characterId === state.selectedElementId);
-        if (char && block) {
-          const defaultTransform = state.characterTransforms[char.id] || { rotation: 0 };
-          const baseTransform = char.keyframingEnabled && char.keyframes?.length > 0
-            ? getInterpolatedKeyframeTransform(char.keyframes, time)
-            : defaultTransform;
-          const animTransform = getAnimatedTransform(block, baseTransform, time);
-          if (animTransform) {
-            rotation = animTransform.rotation || 0;
+        if (isBroll || isWindow) {
+          const transform = state.characterTransforms[state.selectedElementId];
+          if (transform) {
+            rotation = transform.rotation || 0;
+          }
+        } else {
+          const char = state.characters.find(c => c.id === state.selectedElementId);
+          const block = activeBlocks.find(b => b.characterId === state.selectedElementId);
+          if (char && block) {
+            const defaultTransform = state.characterTransforms[char.id] || { rotation: 0 };
+            const baseTransform = char.keyframingEnabled && char.keyframes?.length > 0
+              ? getInterpolatedKeyframeTransform(char.keyframes, time)
+              : defaultTransform;
+            const animTransform = getAnimatedTransform(block, baseTransform, time);
+            if (animTransform) {
+              rotation = animTransform.rotation || 0;
+            }
           }
         }
       }
@@ -1046,7 +1053,7 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
 
       } else {
         // Draw rotation handle for standard mode
-        if (!isCaption && !isBroll && !isWindow && transformMode !== 'skew') {
+        if (!isCaption && transformMode !== 'skew') {
           ctx.beginPath();
           ctx.moveTo(0, -h / 2);
           ctx.lineTo(0, -h / 2 - 24);

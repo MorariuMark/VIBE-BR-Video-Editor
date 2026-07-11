@@ -268,14 +268,25 @@ function coreProjectReducer(state, action) {
     
     case ActionTypes.RESET_CHARACTER_TRANSFORM: {
       const characterId = action.payload;
+      const isBroll = characterId.includes('broll') || characterId === 'broll';
+      const isWindow = characterId.includes('window') || characterId === 'window';
+
+      const defaultX = state.canvasWidth * 0.5;
+      const defaultY = isWindow 
+        ? state.canvasHeight * 0.2 
+        : isBroll 
+        ? state.canvasHeight * 0.3 
+        : state.canvasHeight * 0.65;
+      const defaultScale = isWindow ? 0.9 : isBroll ? 0.8 : 1.0;
+
       return {
         ...state,
         characterTransforms: {
           ...state.characterTransforms,
           [characterId]: {
-            x: state.canvasWidth / 2,
-            y: state.canvasHeight * 0.65,
-            scale: 1,
+            x: defaultX,
+            y: defaultY,
+            scale: defaultScale,
             rotation: 0,
             skewX: 0,
             skewY: 0,
