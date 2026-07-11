@@ -476,15 +476,28 @@ function coreProjectReducer(state, action) {
     case ActionTypes.ADD_TRACK: {
       const { type, name } = action.payload;
       const trackId = `${type}_track_${Date.now()}`;
-      const color = type === 'audio' ? '#00e5ff' : '#444466';
+      let color = '#444466';
+      if (type === 'audio') color = '#00e5ff';
+      else if (type === 'broll') color = '#ffb74d';
+      
       const newTrack = {
         id: trackId,
-        name: name || `${type === 'audio' ? 'Audio' : 'Video'} Track`,
+        name: name || (type === 'audio' ? 'Audio Track' : type === 'broll' ? 'PIP Overlay Track' : 'Video Track'),
         type,
         color,
         clips: [],
       };
-      return { ...state, tracks: [...state.tracks, newTrack] };
+      
+      const nextState = {
+        ...state,
+        tracks: [...state.tracks, newTrack],
+      };
+      
+      if (type === 'broll' && state.brollLayout === 'none') {
+        nextState.brollLayout = 'pip';
+      }
+      
+      return nextState;
     }
     
     case ActionTypes.REMOVE_TRACK: {

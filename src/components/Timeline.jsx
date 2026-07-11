@@ -555,6 +555,11 @@ export default function Timeline() {
     actions.addToast(`Added audio track`, 'success');
   };
 
+  const handleAddBrollTrack = () => {
+    actions.addTrack('broll', 'PIP Overlay Track');
+    actions.addToast(`Added PIP Overlay Track (B-Roll)`, 'success');
+  };
+
   const handleTrackHeaderDragStart = (e, track) => {
     e.stopPropagation();
 
@@ -779,6 +784,13 @@ export default function Timeline() {
             style={{ height: 24, fontSize: 'var(--text-xs)' }}
           >
             + Audio Track
+          </button>
+          <button
+            className="toolbar__btn"
+            onClick={handleAddBrollTrack}
+            style={{ height: 24, fontSize: 'var(--text-xs)' }}
+          >
+            + PIP Track
           </button>
         </div>
 
