@@ -288,19 +288,23 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
           const v = (videoElement && videoElement[activeClip.id]) || 
                     (activeClip.id === 'clip_bg' && videoElement instanceof HTMLVideoElement ? videoElement : null);
           if (v && v.readyState >= 2) {
-            const regionRatio = drawW / drawH;
-            const videoRatio = v.videoWidth / v.videoHeight || (state.canvasWidth / state.canvasHeight);
+            const mediaRatio = v.videoWidth / v.videoHeight || (state.canvasWidth / state.canvasHeight);
+            const containerRatio = drawW / drawH;
             
-            let sx = 0, sy = 0, sw = v.videoWidth, sh = v.videoHeight;
-            if (videoRatio > regionRatio) {
-              sw = sh * regionRatio;
-              sx = (v.videoWidth - sw) / 2;
+            let targetW = drawW;
+            let targetH = drawH;
+            let targetX = drawX;
+            let targetY = drawY;
+            
+            if (mediaRatio > containerRatio) {
+              targetH = drawW / mediaRatio;
+              targetY = drawY + (drawH - targetH) / 2;
             } else {
-              sh = sw / regionRatio;
-              sy = (v.videoHeight - sh) / 2;
+              targetW = drawH * mediaRatio;
+              targetX = drawX + (drawW - targetW) / 2;
             }
             try {
-              ctx.drawImage(v, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
+              ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, targetX, targetY, targetW, targetH);
             } catch (e) {
               ctx.drawImage(v, drawX, drawY, drawW, drawH);
             }
@@ -308,18 +312,22 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
         } else if (activeClip.type === 'image') {
           const img = loadedImages[activeClip.id];
           if (img) {
-            const regionRatio = drawW / drawH;
-            const imgRatio = img.width / img.height || (state.canvasWidth / state.canvasHeight);
+            const mediaRatio = img.width / img.height || (state.canvasWidth / state.canvasHeight);
+            const containerRatio = drawW / drawH;
             
-            let sx = 0, sy = 0, sw = img.width, sh = img.height;
-            if (imgRatio > regionRatio) {
-              sw = sh * regionRatio;
-              sx = (img.width - sw) / 2;
+            let targetW = drawW;
+            let targetH = drawH;
+            let targetX = drawX;
+            let targetY = drawY;
+            
+            if (mediaRatio > containerRatio) {
+              targetH = drawW / mediaRatio;
+              targetY = drawY + (drawH - targetH) / 2;
             } else {
-              sh = sw / regionRatio;
-              sy = (img.height - sh) / 2;
+              targetW = drawH * mediaRatio;
+              targetX = drawX + (drawW - targetW) / 2;
             }
-            ctx.drawImage(img, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
+            ctx.drawImage(img, 0, 0, img.width, img.height, targetX, targetY, targetW, targetH);
           }
         }
 
@@ -397,19 +405,23 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
         const v = (videoElement && videoElement[activeClip.id]) || 
                   (activeClip.id === 'clip_bg' && videoElement instanceof HTMLVideoElement ? videoElement : null);
         if (v && v.readyState >= 2) {
-          const regionRatio = drawW / drawH;
-          const videoRatio = v.videoWidth / v.videoHeight || (state.canvasWidth / state.canvasHeight);
+          const mediaRatio = v.videoWidth / v.videoHeight || (state.canvasWidth / state.canvasHeight);
+          const containerRatio = drawW / drawH;
           
-          let sx = 0, sy = 0, sw = v.videoWidth, sh = v.videoHeight;
-          if (videoRatio > regionRatio) {
-            sw = sh * regionRatio;
-            sx = (v.videoWidth - sw) / 2;
+          let targetW = drawW;
+          let targetH = drawH;
+          let targetX = drawX;
+          let targetY = drawY;
+          
+          if (mediaRatio > containerRatio) {
+            targetH = drawW / mediaRatio;
+            targetY = drawY + (drawH - targetH) / 2;
           } else {
-            sh = sw / regionRatio;
-            sy = (v.videoHeight - sh) / 2;
+            targetW = drawH * mediaRatio;
+            targetX = drawX + (drawW - targetW) / 2;
           }
           try {
-            ctx.drawImage(v, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
+            ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, targetX, targetY, targetW, targetH);
           } catch (e) {
             ctx.drawImage(v, drawX, drawY, drawW, drawH);
           }
@@ -417,18 +429,22 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
       } else if (activeClip.type === 'image') {
         const img = loadedImages[activeClip.id];
         if (img) {
-          const regionRatio = drawW / drawH;
-          const imgRatio = img.width / img.height || (state.canvasWidth / state.canvasHeight);
+          const mediaRatio = img.width / img.height || (state.canvasWidth / state.canvasHeight);
+          const containerRatio = drawW / drawH;
           
-          let sx = 0, sy = 0, sw = img.width, sh = img.height;
-          if (imgRatio > regionRatio) {
-            sw = sh * regionRatio;
-            sx = (img.width - sw) / 2;
+          let targetW = drawW;
+          let targetH = drawH;
+          let targetX = drawX;
+          let targetY = drawY;
+          
+          if (mediaRatio > containerRatio) {
+            targetH = drawW / mediaRatio;
+            targetY = drawY + (drawH - targetH) / 2;
           } else {
-            sh = sw / regionRatio;
-            sy = (img.height - sh) / 2;
+            targetW = drawH * mediaRatio;
+            targetX = drawX + (drawW - targetW) / 2;
           }
-          ctx.drawImage(img, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
+          ctx.drawImage(img, 0, 0, img.width, img.height, targetX, targetY, targetW, targetH);
         }
       }
 

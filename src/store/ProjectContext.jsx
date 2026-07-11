@@ -1585,8 +1585,12 @@ function generateTracksFromBlocks(blocks, characters, state) {
     clips: captionsClips,
   };
 
-  // Combined tracks
-  let combined = [captionsTrack, ...charTracks, ...syncedUserTracks];
+  // Combined tracks: place B-Roll and Window tracks at the very top of the list (above captions)
+  const overlayUserTracks = syncedUserTracks.filter(t => t.type === 'broll' || t.type === 'window');
+  const otherUserTracks = syncedUserTracks.filter(t => t.type !== 'broll' && t.type !== 'window');
+
+  let combined = [...overlayUserTracks, captionsTrack, ...charTracks, ...otherUserTracks];
+  
   if (state.windowSlideshowEnabled) {
     let windowTrack = (state.tracks || []).find(t => t.type === 'window');
     if (!windowTrack) {
@@ -1598,16 +1602,20 @@ function generateTracksFromBlocks(blocks, characters, state) {
         clips: [],
       };
     }
-    combined = [windowTrack, ...combined];
+    if (!combined.some(t => t.id === 'track_window_slideshow')) {
+      combined = [windowTrack, ...combined];
+    }
   }
   
   // Sort tracks by existing order if available
   if (state.tracks && state.tracks.length > 0) {
     const existingIds = state.tracks.map(t => t.id);
     combined.sort((a, b) => {
-      if (a.id === 'track_window_slideshow') return -1;
-      if (b.id === 'track_window_slideshow') return 1;
-      
+      const isOverlayA = a.type === 'broll' || a.type === 'window';
+      const isOverlayB = b.type === 'broll' || b.type === 'window';
+      if (isOverlayA && !isOverlayB) return -1;
+      if (!isOverlayA && isOverlayB) return 1;
+
       const idxA = existingIds.indexOf(a.id);
       const idxB = existingIds.indexOf(b.id);
       if (idxA === -1 && idxB === -1) return 0;

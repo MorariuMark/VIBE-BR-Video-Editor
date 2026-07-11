@@ -1031,11 +1031,12 @@ export default function Timeline() {
           {(() => {
             const clipTrack = state.tracks.find(t => t.id === clipContextMenu.trackId);
             if (!clipTrack) return null;
-            const isVideoClip = clipTrack.type === 'video';
+            const isVideoTrackOrOverlay = clipTrack.type === 'video' || clipTrack.type === 'broll' || clipTrack.type === 'window';
+            const isExtractAudioVisible = isVideoTrackOrOverlay && clipContextMenu.clip.type === 'video';
             const otherTracks = state.tracks.filter(t => t.type === clipTrack.type && t.id !== clipTrack.id);
             return (
               <>
-                {isVideoClip && (
+                {isExtractAudioVisible && (
                   <HoverMenuItem text="🔊 Extract Audio" onClick={handleExtractAudio} />
                 )}
                 {otherTracks.map(t => (
