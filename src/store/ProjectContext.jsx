@@ -1066,9 +1066,6 @@ function coreProjectReducer(state, action) {
         return t;
       });
       
-      let audioTrack = updatedTracks.find(t => t.type === 'audio');
-      let finalTracks = [...updatedTracks];
-      
       const newAudioClip = {
         id: `audio_extracted_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
         name: `${videoClip.name} (Audio)`,
@@ -1081,28 +1078,15 @@ function coreProjectReducer(state, action) {
         speed: videoClip.speed ?? 1.0,
       };
       
-      if (audioTrack) {
-        finalTracks = finalTracks.map(t => {
-          if (t.id === audioTrack.id) {
-            return {
-              ...t,
-              clips: [...t.clips, newAudioClip].sort((a, b) => a.startTime - b.startTime)
-            };
-          }
-          return t;
-        });
-      } else {
-        const newAudioTrack = {
-          id: `audio_track_${Date.now()}`,
-          name: 'Extracted Audio',
-          type: 'audio',
-          color: '#00e5ff',
-          clips: [newAudioClip],
-        };
-        finalTracks.push(newAudioTrack);
-      }
+      const newAudioTrack = {
+        id: `audio_track_extracted_${Date.now()}`,
+        name: `Extracted - ${videoClip.name}`,
+        type: 'audio',
+        color: '#00e676', // Green color
+        clips: [newAudioClip],
+      };
       
-      return { ...state, tracks: finalTracks };
+      return { ...state, tracks: [...updatedTracks, newAudioTrack] };
     }
 
     case ActionTypes.SET_BROLL_LAYOUT: {
