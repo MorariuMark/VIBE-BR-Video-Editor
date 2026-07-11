@@ -681,8 +681,33 @@ function coreProjectReducer(state, action) {
     case ActionTypes.SET_TOTAL_DURATION:
       return { ...state, totalDuration: action.payload };
     
-    case ActionTypes.SELECT_CLIP:
-      return { ...state, selectedClipId: action.payload };
+    case ActionTypes.SELECT_CLIP: {
+      const clipId = action.payload;
+      if (!clipId) {
+        return { ...state, selectedClipId: null, selectedElementId: null };
+      }
+      
+      const track = state.tracks.find(t => t.clips.some(c => c.id === clipId));
+      let selectedElementId = null;
+      if (track) {
+        if (track.type === 'character') {
+          selectedElementId = track.characterId;
+        } else if (track.type === 'broll' || track.type === 'window') {
+          selectedElementId = track.id;
+        } else if (track.type === 'captions') {
+          const clip = track.clips.find(c => c.id === clipId);
+          if (clip && clip.blockId) {
+            selectedElementId = `caption_${clip.blockId}`;
+          }
+        }
+      }
+      
+      return {
+        ...state,
+        selectedClipId: clipId,
+        selectedElementId,
+      };
+    }
     
     case ActionTypes.SET_CHARACTER_TRANSFORM: {
       const { characterId, transform } = action.payload;

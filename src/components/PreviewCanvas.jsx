@@ -460,6 +460,8 @@ export default function PreviewCanvas() {
 
     // 1. Check if clicking on the resize handle of the currently selected element
     if (state.selectedElementId) {
+      let cx, cy, w, h;
+      const isCaption = state.selectedElementId.startsWith('caption_');
       const isBroll = state.selectedElementId.includes('broll') || state.selectedElementId === 'broll';
       const isWindow = state.selectedElementId.includes('window') || state.selectedElementId === 'window';
 
