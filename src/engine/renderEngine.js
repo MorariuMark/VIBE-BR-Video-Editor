@@ -269,13 +269,52 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
     } else if (track.type === 'window') {
       const activeClip = track.clips.find(clip => time >= clip.startTime && time < clip.startTime + clip.duration);
       if (activeClip) {
-        const drawW = width * 0.9;
-        const drawH = height * 0.3;
-        const drawX = (width - drawW) / 2;
-        const drawY = height * 0.05; // 5% from top
+        const transform = state.characterTransforms[track.id] || {
+          x: state.canvasWidth * 0.5,
+          y: state.canvasHeight * 0.2,
+          scale: 0.9,
+          rotation: 0,
+          rotateX: 0,
+          rotateY: 0,
+          skewX: 0,
+          skewY: 0,
+          flipX: 1,
+          flipY: 1
+        };
+
+        let mediaRatio = 16/9;
+        if (activeClip.type === 'video') {
+          const v = (videoElement && videoElement[activeClip.id]) || 
+                    (activeClip.id === 'clip_bg' && videoElement instanceof HTMLVideoElement ? videoElement : null);
+          if (v && v.videoWidth) {
+            mediaRatio = v.videoWidth / v.videoHeight;
+          }
+        } else if (activeClip.type === 'image') {
+          const img = loadedImages[activeClip.id];
+          if (img && img.width) {
+            mediaRatio = img.width / img.height;
+          }
+        }
+
+        const drawW = 640 * transform.scale * scaleFactor;
+        const drawH = (640 / mediaRatio) * transform.scale * scaleFactor;
+        const cx = transform.x * scaleFactor;
+        const cy = transform.y * scaleFactor;
+        const drawX = -drawW / 2;
+        const drawY = -drawH / 2;
 
         ctx.save();
         
+        ctx.translate(cx, cy);
+        ctx.rotate((transform.rotation * Math.PI) / 180);
+        
+        let scaleX = Math.cos(transform.rotateY * Math.PI / 180) * (transform.flipX ?? 1);
+        let scaleY = Math.cos(transform.rotateX * Math.PI / 180) * (transform.flipY ?? 1);
+        
+        const tanSkewX = Math.tan((transform.skewX ?? 0) * Math.PI / 180);
+        const tanSkewY = Math.tan((transform.skewY ?? 0) * Math.PI / 180);
+        ctx.transform(scaleX, scaleX * tanSkewY, scaleY * tanSkewX, scaleY, 0, 0);
+
         ctx.beginPath();
         if (ctx.roundRect) {
           ctx.roundRect(drawX, drawY, drawW, drawH, 12 * scaleFactor);
@@ -288,23 +327,8 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
           const v = (videoElement && videoElement[activeClip.id]) || 
                     (activeClip.id === 'clip_bg' && videoElement instanceof HTMLVideoElement ? videoElement : null);
           if (v && v.readyState >= 2) {
-            const mediaRatio = v.videoWidth / v.videoHeight || (state.canvasWidth / state.canvasHeight);
-            const containerRatio = drawW / drawH;
-            
-            let targetW = drawW;
-            let targetH = drawH;
-            let targetX = drawX;
-            let targetY = drawY;
-            
-            if (mediaRatio > containerRatio) {
-              targetH = drawW / mediaRatio;
-              targetY = drawY + (drawH - targetH) / 2;
-            } else {
-              targetW = drawH * mediaRatio;
-              targetX = drawX + (drawW - targetW) / 2;
-            }
             try {
-              ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, targetX, targetY, targetW, targetH);
+              ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, drawX, drawY, drawW, drawH);
             } catch (e) {
               ctx.drawImage(v, drawX, drawY, drawW, drawH);
             }
@@ -312,22 +336,7 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
         } else if (activeClip.type === 'image') {
           const img = loadedImages[activeClip.id];
           if (img) {
-            const mediaRatio = img.width / img.height || (state.canvasWidth / state.canvasHeight);
-            const containerRatio = drawW / drawH;
-            
-            let targetW = drawW;
-            let targetH = drawH;
-            let targetX = drawX;
-            let targetY = drawY;
-            
-            if (mediaRatio > containerRatio) {
-              targetH = drawW / mediaRatio;
-              targetY = drawY + (drawH - targetH) / 2;
-            } else {
-              targetW = drawH * mediaRatio;
-              targetX = drawX + (drawW - targetW) / 2;
-            }
-            ctx.drawImage(img, 0, 0, img.width, img.height, targetX, targetY, targetW, targetH);
+            ctx.drawImage(img, 0, 0, img.width, img.height, drawX, drawY, drawW, drawH);
           }
         }
 
@@ -336,6 +345,10 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
         const hasSelectedClip = track.clips.some(c => c.id === state.selectedClipId);
         if (drawHandles && (state.selectedElementId === track.id || hasSelectedClip)) {
           ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate((transform.rotation * Math.PI) / 180);
+          ctx.transform(scaleX, scaleX * tanSkewY, scaleY * tanSkewX, scaleY, 0, 0);
+
           ctx.strokeStyle = '#ffd740'; // Gold border for slideshow window
           ctx.lineWidth = 3 * scaleFactor;
           ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
@@ -357,41 +370,104 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
       const activeClip = track.clips.find(clip => time >= clip.startTime && time < clip.startTime + clip.duration);
       if (!activeClip) return;
 
-      let drawX = 0, drawY = 0, drawW = width, drawH = height;
+      const transform = state.characterTransforms[track.id] || {
+        x: state.canvasWidth * 0.5,
+        y: state.canvasHeight * 0.3,
+        scale: 0.8,
+        rotation: 0,
+        rotateX: 0,
+        rotateY: 0,
+        skewX: 0,
+        skewY: 0,
+        flipX: 1,
+        flipY: 1
+      };
+
+      let drawW = width, drawH = height, drawX = 0, drawY = 0;
+      let cx = width * 0.5, cy = height * 0.5;
       let isPip = false;
+
+      let mediaRatio = 16/9;
+      if (activeClip.type === 'video') {
+        const v = (videoElement && videoElement[activeClip.id]) || 
+                  (activeClip.id === 'clip_bg' && videoElement instanceof HTMLVideoElement ? videoElement : null);
+        if (v && v.videoWidth) {
+          mediaRatio = v.videoWidth / v.videoHeight;
+        }
+      } else if (activeClip.type === 'image') {
+        const img = loadedImages[activeClip.id];
+        if (img && img.width) {
+          mediaRatio = img.width / img.height;
+        }
+      }
 
       if (state.brollLayout === 'split') {
         drawX = 0;
         drawY = 0;
         drawW = width;
         drawH = height * 0.45;
-      } else if (state.brollLayout === 'pip') {
-        const bX = state.brollX !== undefined ? state.brollX : 50;
-        const bY = state.brollY !== undefined ? state.brollY : 20;
-        const bW = state.brollWidth !== undefined ? state.brollWidth : 80;
-        const bH = state.brollHeight !== undefined ? state.brollHeight : 25;
-
-        drawW = width * (bW / 100);
-        drawH = height * (bH / 100);
-        drawX = (width * (bX / 100)) - (drawW / 2);
-        drawY = (height * (bY / 100)) - (drawH / 2);
-        isPip = true;
-      } else if (state.brollLayout === 'custom') {
-        const bX = state.brollX !== undefined ? state.brollX : 50;
-        const bY = state.brollY !== undefined ? state.brollY : 20;
-        const bW = state.brollWidth !== undefined ? state.brollWidth : 80;
-        const bH = state.brollHeight !== undefined ? state.brollHeight : 25;
-
-        drawW = width * (bW / 100);
-        drawH = height * (bH / 100);
-        drawX = (width * (bX / 100)) - (drawW / 2);
-        drawY = (height * (bY / 100)) - (drawH / 2);
+      } else {
+        drawW = 640 * transform.scale * scaleFactor;
+        drawH = (640 / mediaRatio) * transform.scale * scaleFactor;
+        cx = transform.x * scaleFactor;
+        cy = transform.y * scaleFactor;
+        drawX = -drawW / 2;
+        drawY = -drawH / 2;
         isPip = true;
       }
 
       ctx.save();
 
-      if (isPip) {
+      if (state.brollLayout === 'split') {
+        ctx.beginPath();
+        ctx.rect(drawX, drawY, drawW, drawH);
+        ctx.clip();
+
+        if (activeClip.type === 'video') {
+          const v = (videoElement && videoElement[activeClip.id]) || 
+                    (activeClip.id === 'clip_bg' && videoElement instanceof HTMLVideoElement ? videoElement : null);
+          if (v && v.readyState >= 2) {
+            const containerRatio = drawW / drawH;
+            let targetW = drawW, targetH = drawH, targetX = drawX, targetY = drawY;
+            if (mediaRatio > containerRatio) {
+              targetH = drawW / mediaRatio;
+              targetY = drawY + (drawH - targetH) / 2;
+            } else {
+              targetW = drawH * mediaRatio;
+              targetX = drawX + (drawW - targetW) / 2;
+            }
+            try {
+              ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, targetX, targetY, targetW, targetH);
+            } catch (e) {
+              ctx.drawImage(v, drawX, drawY, drawW, drawH);
+            }
+          }
+        } else if (activeClip.type === 'image') {
+          const img = loadedImages[activeClip.id];
+          if (img) {
+            const containerRatio = drawW / drawH;
+            let targetW = drawW, targetH = drawH, targetX = drawX, targetY = drawY;
+            if (mediaRatio > containerRatio) {
+              targetH = drawW / mediaRatio;
+              targetY = drawY + (drawH - targetH) / 2;
+            } else {
+              targetW = drawH * mediaRatio;
+              targetX = drawX + (drawW - targetW) / 2;
+            }
+            ctx.drawImage(img, 0, 0, img.width, img.height, targetX, targetY, targetW, targetH);
+          }
+        }
+      } else {
+        ctx.translate(cx, cy);
+        ctx.rotate((transform.rotation * Math.PI) / 180);
+        
+        let scaleX = Math.cos(transform.rotateY * Math.PI / 180) * (transform.flipX ?? 1);
+        let scaleY = Math.cos(transform.rotateX * Math.PI / 180) * (transform.flipY ?? 1);
+        
+        const tanSkewX = Math.tan((transform.skewX ?? 0) * Math.PI / 180);
+        const tanSkewY = Math.tan((transform.skewY ?? 0) * Math.PI / 180);
+        ctx.transform(scaleX, scaleX * tanSkewY, scaleY * tanSkewX, scaleY, 0, 0);
+
         ctx.beginPath();
         if (ctx.roundRect) {
           ctx.roundRect(drawX, drawY, drawW, drawH, 12 * scaleFactor);
@@ -399,61 +475,49 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
           ctx.rect(drawX, drawY, drawW, drawH);
         }
         ctx.clip();
-      }
 
-      if (activeClip.type === 'video') {
-        const v = (videoElement && videoElement[activeClip.id]) || 
-                  (activeClip.id === 'clip_bg' && videoElement instanceof HTMLVideoElement ? videoElement : null);
-        if (v && v.readyState >= 2) {
-          const mediaRatio = v.videoWidth / v.videoHeight || (state.canvasWidth / state.canvasHeight);
-          const containerRatio = drawW / drawH;
-          
-          let targetW = drawW;
-          let targetH = drawH;
-          let targetX = drawX;
-          let targetY = drawY;
-          
-          if (mediaRatio > containerRatio) {
-            targetH = drawW / mediaRatio;
-            targetY = drawY + (drawH - targetH) / 2;
-          } else {
-            targetW = drawH * mediaRatio;
-            targetX = drawX + (drawW - targetW) / 2;
+        if (activeClip.type === 'video') {
+          const v = (videoElement && videoElement[activeClip.id]) || 
+                    (activeClip.id === 'clip_bg' && videoElement instanceof HTMLVideoElement ? videoElement : null);
+          if (v && v.readyState >= 2) {
+            try {
+              ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, drawX, drawY, drawW, drawH);
+            } catch (e) {
+              ctx.drawImage(v, drawX, drawY, drawW, drawH);
+            }
           }
-          try {
-            ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, targetX, targetY, targetW, targetH);
-          } catch (e) {
-            ctx.drawImage(v, drawX, drawY, drawW, drawH);
+        } else if (activeClip.type === 'image') {
+          const img = loadedImages[activeClip.id];
+          if (img) {
+            ctx.drawImage(img, 0, 0, img.width, img.height, drawX, drawY, drawW, drawH);
           }
-        }
-      } else if (activeClip.type === 'image') {
-        const img = loadedImages[activeClip.id];
-        if (img) {
-          const mediaRatio = img.width / img.height || (state.canvasWidth / state.canvasHeight);
-          const containerRatio = drawW / drawH;
-          
-          let targetW = drawW;
-          let targetH = drawH;
-          let targetX = drawX;
-          let targetY = drawY;
-          
-          if (mediaRatio > containerRatio) {
-            targetH = drawW / mediaRatio;
-            targetY = drawY + (drawH - targetH) / 2;
-          } else {
-            targetW = drawH * mediaRatio;
-            targetX = drawX + (drawW - targetW) / 2;
-          }
-          ctx.drawImage(img, 0, 0, img.width, img.height, targetX, targetY, targetW, targetH);
         }
       }
 
       ctx.restore();
 
-      if (isPip) {
+      if (state.brollLayout === 'split') {
+        ctx.save();
+        ctx.strokeStyle = '#ffd21e';
+        ctx.lineWidth = 4 * scaleFactor;
+        ctx.beginPath();
+        ctx.moveTo(0, height * 0.45);
+        ctx.lineTo(width, height * 0.45);
+        ctx.stroke();
+        ctx.restore();
+      } else if (isPip) {
         const hasSelectedClip = track.clips.some(c => c.id === state.selectedClipId);
         if (drawHandles && (state.selectedElementId === track.id || hasSelectedClip)) {
           ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate((transform.rotation * Math.PI) / 180);
+          
+          let scaleX = Math.cos(transform.rotateY * Math.PI / 180) * (transform.flipX ?? 1);
+          let scaleY = Math.cos(transform.rotateX * Math.PI / 180) * (transform.flipY ?? 1);
+          const tanSkewX = Math.tan((transform.skewX ?? 0) * Math.PI / 180);
+          const tanSkewY = Math.tan((transform.skewY ?? 0) * Math.PI / 180);
+          ctx.transform(scaleX, scaleX * tanSkewY, scaleY * tanSkewX, scaleY, 0, 0);
+
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
           ctx.lineWidth = 3 * scaleFactor;
           ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
@@ -469,15 +533,6 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
           ctx.stroke();
           ctx.restore();
         }
-      } else if (state.brollLayout === 'split') {
-        ctx.save();
-        ctx.strokeStyle = '#ffd21e';
-        ctx.lineWidth = 4 * scaleFactor;
-        ctx.beginPath();
-        ctx.moveTo(0, height * 0.45);
-        ctx.lineTo(width, height * 0.45);
-        ctx.stroke();
-        ctx.restore();
       }
     } else if (track.type === 'character') {
       const charId = track.characterId;

@@ -465,25 +465,43 @@ export default function PreviewCanvas() {
       const isBroll = state.selectedElementId.includes('broll') || state.selectedElementId === 'broll';
       const isWindow = state.selectedElementId.includes('window') || state.selectedElementId === 'window';
 
-      let currentTransform = (isBroll || isWindow)
-        ? {
-            x: isBroll ? (state.brollX !== undefined ? state.brollX : 50) : 50,
-            y: isBroll ? (state.brollY !== undefined ? state.brollY : 20) : 20,
-            width: isBroll ? (state.brollWidth !== undefined ? state.brollWidth : 80) : 90,
-            height: isBroll ? (state.brollHeight !== undefined ? state.brollHeight : 25) : 30,
-          }
-        : state.characterTransforms[state.selectedElementId] || {
-            x: state.canvasWidth / 2,
-            y: isCaption ? state.canvasHeight * 0.85 : state.canvasHeight * 0.65,
-            scale: 1,
-            rotation: 0,
-          };
+      let currentTransform = state.characterTransforms[state.selectedElementId] || {
+        x: state.canvasWidth * 0.5,
+        y: isWindow ? state.canvasHeight * 0.2 : state.canvasHeight * 0.3,
+        scale: isWindow ? 0.9 : 0.8,
+        rotation: 0,
+        rotateX: 0,
+        rotateY: 0,
+        skewX: 0,
+        skewY: 0,
+        flipX: 1,
+        flipY: 1
+      };
 
       if (isBroll || isWindow) {
-        cx = canvasSize.width * (currentTransform.x / 100);
-        cy = canvasSize.height * (currentTransform.y / 100);
-        w = canvasSize.width * (currentTransform.width / 100);
-        h = canvasSize.height * (currentTransform.height / 100);
+        let mediaRatio = 16/9;
+        const track = state.tracks.find(t => t.id === state.selectedElementId);
+        if (track) {
+          const activeClip = track.clips.find(c => state.currentTime >= c.startTime && state.currentTime <= c.startTime + c.duration);
+          if (activeClip) {
+            if (activeClip.type === 'video') {
+              const v = (videoElementsRef.current && videoElementsRef.current[activeClip.id]);
+              if (v && v.videoWidth) {
+                mediaRatio = v.videoWidth / v.videoHeight;
+              }
+            } else if (activeClip.type === 'image') {
+              const img = loadedImagesRef.current[activeClip.id];
+              if (img && img.width) {
+                mediaRatio = img.width / img.height;
+              }
+            }
+          }
+        }
+        
+        cx = currentTransform.x * scaleFactor;
+        cy = currentTransform.y * scaleFactor;
+        w = 640 * currentTransform.scale * scaleFactor;
+        h = (640 / mediaRatio) * currentTransform.scale * scaleFactor;
       } else if (!isCaption) {
         const char = state.characters.find(c => c.id === state.selectedElementId);
         if (char && char.keyframingEnabled && char.keyframes?.length > 0) {
@@ -856,17 +874,41 @@ export default function PreviewCanvas() {
       for (const track of overlayTracks) {
         const activeClip = track.clips.find(c => state.currentTime >= c.startTime && state.currentTime <= c.startTime + c.duration);
         const isBroll = track.type === 'broll';
+        const isWindow = track.type === 'window';
         
         if (activeClip || state.selectedElementId === track.id) {
-          const bX = isBroll ? (state.brollX !== undefined ? state.brollX : 50) : 50;
-          const bY = isBroll ? (state.brollY !== undefined ? state.brollY : 20) : 20;
-          const bW = isBroll ? (state.brollWidth !== undefined ? state.brollWidth : 80) : 90;
-          const bH = isBroll ? (state.brollHeight !== undefined ? state.brollHeight : 25) : 30;
+          const transform = state.characterTransforms[track.id] || {
+            x: state.canvasWidth * 0.5,
+            y: isWindow ? state.canvasHeight * 0.2 : state.canvasHeight * 0.3,
+            scale: isWindow ? 0.9 : 0.8,
+            rotation: 0,
+            rotateX: 0,
+            rotateY: 0,
+            skewX: 0,
+            skewY: 0,
+            flipX: 1,
+            flipY: 1
+          };
 
-          const cx = canvasSize.width * (bX / 100);
-          const cy = canvasSize.height * (bY / 100);
-          const w = canvasSize.width * (bW / 100);
-          const h = canvasSize.height * (bH / 100);
+          let mediaRatio = 16/9;
+          if (activeClip) {
+            if (activeClip.type === 'video') {
+              const v = (videoElementsRef.current && videoElementsRef.current[activeClip.id]);
+              if (v && v.videoWidth) {
+                mediaRatio = v.videoWidth / v.videoHeight;
+              }
+            } else if (activeClip.type === 'image') {
+              const img = loadedImagesRef.current[activeClip.id];
+              if (img && img.width) {
+                mediaRatio = img.width / img.height;
+              }
+            }
+          }
+
+          const cx = transform.x * scaleFactor;
+          const cy = transform.y * scaleFactor;
+          const w = 640 * transform.scale * scaleFactor;
+          const h = (640 / mediaRatio) * transform.scale * scaleFactor;
 
           const rx = cx - w / 2;
           const ry = cy - h / 2;
@@ -880,12 +922,7 @@ export default function PreviewCanvas() {
               elementId: track.id,
               startX: x,
               startY: y,
-              origTransform: {
-                x: bX,
-                y: bY,
-                width: bW,
-                height: bH,
-              },
+              origTransform: transform,
             });
             break;
           }
@@ -963,103 +1000,49 @@ export default function PreviewCanvas() {
     }
 
     if (dragging.type === 'resize') {
-      const isBroll = dragging.elementId.includes('broll') || dragging.elementId === 'broll';
-      const isWindow = dragging.elementId.includes('window') || dragging.elementId === 'window';
-
-      if (isBroll || isWindow) {
-        const currentDist = Math.sqrt((x - dragging.cx) ** 2 + (y - dragging.cy) ** 2);
-        const ratio = currentDist / dragging.origDist;
-        const aspect = state.brollAspectRatio || 'custom';
-        
-        let origW = dragging.origTransform.width !== undefined ? dragging.origTransform.width : (isBroll ? 80 : 90);
-        let origH = dragging.origTransform.height !== undefined ? dragging.origTransform.height : (isBroll ? 25 : 30);
-        
-        let newW = Math.max(5, Math.min(100, origW * ratio));
-        let newH = Math.max(5, Math.min(100, origH * ratio));
-
-        if (aspect !== 'custom') {
-          let val = 16/9;
-          if (aspect === '9:16') val = 9/16;
-          else if (aspect === '1:1') val = 1/1;
-          else if (aspect === '4:3') val = 4/3;
-
-          const wPx = state.canvasWidth * (newW / 100);
-          const hPx = wPx / val;
-          newH = Math.max(5, Math.min(100, (hPx / state.canvasHeight) * 100));
-        }
-
-        actions.setBrollSettings({
-          x: state.brollX !== undefined ? state.brollX : 50,
-          y: state.brollY !== undefined ? state.brollY : 20,
-          width: Math.round(newW * 10) / 10,
-          height: Math.round(newH * 10) / 10,
-          aspectRatio: aspect,
-        });
+      const currentDist = Math.sqrt((x - dragging.cx) ** 2 + (y - dragging.cy) ** 2);
+      const newScale = Math.max(0.2, Math.min(3, dragging.origTransform.scale * (currentDist / dragging.origDist)));
+      
+      const isCaption = dragging.elementId.startsWith('caption_');
+      const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
+      if (char && char.keyframingEnabled) {
+        const newTransform = {
+          ...dragging.origTransform,
+          scale: newScale,
+        };
+        actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
       } else {
-        const currentDist = Math.sqrt((x - dragging.cx) ** 2 + (y - dragging.cy) ** 2);
-        const newScale = Math.max(0.2, Math.min(3, dragging.origTransform.scale * (currentDist / dragging.origDist)));
-        
-        const isCaption = dragging.elementId.startsWith('caption_');
-        const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
-        if (char && char.keyframingEnabled) {
-          const newTransform = {
-            ...dragging.origTransform,
-            scale: newScale,
-          };
-          actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
-        } else {
-          actions.setCharacterTransform(dragging.elementId, {
-            ...dragging.origTransform,
-            scale: newScale,
-          });
-        }
+        actions.setCharacterTransform(dragging.elementId, {
+          ...dragging.origTransform,
+          scale: newScale,
+        });
       }
     } else if (dragging.type === 'move') {
-      const isBroll = dragging.elementId.includes('broll') || dragging.elementId === 'broll';
-      const isWindow = dragging.elementId.includes('window') || dragging.elementId === 'window';
+      const dx = x - dragging.startX;
+      const dy = y - dragging.startY;
+      const newX = dragging.origTransform.x + dx / scaleFactor;
+      const adjustedDy = state.brollLayout === 'split' ? (dy / 0.55) : dy;
+      const newY = dragging.origTransform.y + adjustedDy / scaleFactor;
 
-      if (isBroll || isWindow) {
-        const dx = x - dragging.startX;
-        const dy = y - dragging.startY;
-        const dxPct = (dx / canvasSize.width) * 100;
-        const dyPct = (dy / canvasSize.height) * 100;
-        const newX = Math.max(0, Math.min(100, dragging.origTransform.x + dxPct));
-        const newY = Math.max(0, Math.min(100, dragging.origTransform.y + dyPct));
-
-        actions.setBrollSettings({
-          x: Math.round(newX * 10) / 10,
-          y: Math.round(newY * 10) / 10,
-          width: state.brollWidth !== undefined ? state.brollWidth : 80,
-          height: state.brollHeight !== undefined ? state.brollHeight : 25,
-          aspectRatio: state.brollAspectRatio || 'custom',
-        });
-      } else {
-        const dx = x - dragging.startX;
-        const dy = y - dragging.startY;
-        const newX = dragging.origTransform.x + dx / scaleFactor;
-        const adjustedDy = state.brollLayout === 'split' ? (dy / 0.55) : dy;
-        const newY = dragging.origTransform.y + adjustedDy / scaleFactor;
-
-        const isCaption = dragging.elementId.startsWith('caption_');
-        const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
-        if (char && char.keyframingEnabled) {
-          const newTransform = {
-            ...dragging.origTransform,
-            x: newX,
-            y: newY,
-          };
-          if (dragging.keyframeIndex !== undefined) {
-            actions.updateCharacterKeyframe(char.id, dragging.keyframeIndex, newTransform);
-          } else {
-            actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
-          }
+      const isCaption = dragging.elementId.startsWith('caption_');
+      const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
+      if (char && char.keyframingEnabled) {
+        const newTransform = {
+          ...dragging.origTransform,
+          x: newX,
+          y: newY,
+        };
+        if (dragging.keyframeIndex !== undefined) {
+          actions.updateCharacterKeyframe(char.id, dragging.keyframeIndex, newTransform);
         } else {
-          actions.setCharacterTransform(dragging.elementId, {
-            ...dragging.origTransform,
-            x: newX,
-            y: newY,
-          });
+          actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
         }
+      } else {
+        actions.setCharacterTransform(dragging.elementId, {
+          ...dragging.origTransform,
+          x: newX,
+          y: newY,
+        });
       }
     } else if (dragging.type === 'rotate') {
       const angle = Math.atan2(y - dragging.cy, x - dragging.cx) * 180 / Math.PI;
