@@ -73,82 +73,65 @@ export default function Timeline() {
         startTime = Math.max(0, dropX / pixelsPerSecond);
       }
 
-      if (track.type === 'video') {
-        if (item.type === 'video' || item.type === 'image') {
-          const newClip = {
-            id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            name: item.name,
-            startTime,
-            duration: item.duration || 5, // default 5s
-            color: track.color || '#444466',
-            path: item.path,
-            dataUrl: item.dataUrl,
-            type: item.type,
-          };
-          actions.addClipToTrack(track.id, newClip);
-          actions.addToast(`Added "${item.name}" to track`, 'success');
-        } else {
-          actions.addToast('Mismatched media type. Drag a video/image file here.', 'warning');
-        }
-      } else if (track.type === 'broll') {
-        if (item.type === 'video' || item.type === 'image') {
-          const newClip = {
-            id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            name: item.name,
-            startTime,
-            duration: item.duration || 5, // default 5s
-            color: track.color || '#ffb74d',
-            path: item.path,
-            dataUrl: item.dataUrl,
-            type: item.type,
-          };
-          actions.addClipToTrack(track.id, newClip);
-          actions.addToast(`Added "${item.name}" to B-Roll overlay`, 'success');
-        } else {
-          actions.addToast('Mismatched media type. Drag a video/image file here.', 'warning');
-        }
-      } else if (track.type === 'window') {
-        if (item.type === 'video' || item.type === 'image') {
-          const newClip = {
-            id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            name: item.name,
-            startTime,
-            duration: item.duration || 5, // default 5s
-            color: track.color || '#ffd740',
-            path: item.path,
-            dataUrl: item.dataUrl,
-            type: item.type,
-          };
-          actions.addClipToTrack(track.id, newClip);
-          actions.addToast(`Added "${item.name}" to Window slideshow`, 'success');
-        } else {
-          actions.addToast('Mismatched media type. Drag a video/image file here.', 'warning');
-        }
-      } else if (track.type === 'audio') {
-        if (item.type === 'audio') {
-          const newClip = {
-            id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            name: item.name,
-            startTime,
-            duration: item.duration || 5, // default 5s
-            color: track.color || '#00e5ff',
-            path: item.path,
-            dataUrl: item.dataUrl,
-            type: 'audio',
-          };
-          actions.addClipToTrack(track.id, newClip);
-          actions.addToast(`Added "${item.name}" to track`, 'success');
-        } else {
-          actions.addToast('Mismatched media type. Drag an audio file here.', 'warning');
-        }
-      } else if (track.type === 'character') {
-        if (item.type === 'image') {
-          actions.assignCharacterAsset(track.characterId, item);
-          actions.addToast(`Assigned "${item.name}" to character ${track.name}`, 'success');
-        } else {
-          actions.addToast('Mismatched media type. Drag an image/PNG file here.', 'warning');
-        }
+      // Check media type mismatches first
+      const isVideoOrImage = item.type === 'video' || item.type === 'image';
+      if ((track.type === 'video' || track.type === 'broll' || track.type === 'window') && !isVideoOrImage) {
+        actions.addToast('Mismatched media type. Drag a video/image file here.', 'warning');
+        return;
       }
+      if (track.type === 'audio' && item.type !== 'audio') {
+        actions.addToast('Mismatched media type. Drag an audio file here.', 'warning');
+        return;
+      }
+      if (track.type === 'character' && item.type !== 'image') {
+        actions.addToast('Mismatched media type. Drag an image/PNG file here.', 'warning');
+        return;
+      }
+
+      if (track.type === 'character') {
+        actions.assignCharacterAsset(track.characterId, item);
+        actions.addToast(`Assigned "${item.name}" to character ${track.name}`, 'success');
+        return;
+      }
+
+      // Clamping logic to prevent overlapping with existing clips
+      const trackClips = track.clips || [];
+      const preceding = trackClips.filter(c => c.startTime <= startTime);
+      const succeeding = trackClips.filter(c => c.startTime > startTime);
+      
+      const prevLimit = preceding.length > 0 
+        ? Math.max(...preceding.map(c => c.startTime + c.duration))
+        : 0;
+      const nextLimit = succeeding.length > 0
+        ? Math.min(...succeeding.map(c => c.startTime))
+        : state.totalDuration;
+
+      let adjustedStartTime = Math.max(startTime, prevLimit);
+      let adjustedDuration = item.duration || 5;
+
+      if (adjustedStartTime + adjustedDuration > nextLimit) {
+        adjustedDuration = nextLimit - adjustedStartTime;
+      }
+
+      if (adjustedDuration < 0.1) {
+        actions.addToast('No empty space available at drop location.', 'warning');
+        return;
+      }
+
+      const newClip = {
+        id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        name: item.name,
+        startTime: adjustedStartTime,
+        duration: adjustedDuration,
+        color: track.color || (track.type === 'video' ? '#444466' : track.type === 'audio' ? '#00e5ff' : track.type === 'broll' ? '#ffb74d' : '#ffd740'),
+        path: item.path,
+        dataUrl: item.dataUrl,
+        type: item.type,
+      };
+
+      actions.addClipToTrack(track.id, newClip);
+      actions.addToast(`Added "${item.name}" to ${track.name}`, 'success');
+
     } catch (err) {
       console.error(err);
     }
@@ -818,7 +801,6 @@ export default function Timeline() {
           {generateRulerTicks()}
         </div>
       </div>
-
       {/* Tracks */}
       <div
         className="timeline-tracks-container"
@@ -826,160 +808,162 @@ export default function Timeline() {
         onClick={handleTrackClick}
         style={{ overflow: 'auto', paddingBottom: '120px' }}
       >
-        {/* Playhead */}
-        <div
-          ref={playheadRef}
-          className="timeline-playhead"
-          style={{ left: `${playheadX}px` }}
-        />
-
-        {tracks.map(track => (
+        <div style={{ position: 'relative', width: 'fit-content', minWidth: '100%', minHeight: '100%' }}>
+          {/* Playhead */}
           <div
-            key={track.id}
-            data-track-id={track.id}
-            className={`timeline-track ${track.type === 'audio' ? 'timeline-track--audio' : ''} ${dragOverTrackId === track.id ? 'timeline-track--dragover' : ''}`}
-            onDragOver={(e) => {
-              if (draggingTrackId) {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                setDragOverTrackId(track.id);
-              } else {
-                handleDragOver(e);
-              }
-            }}
-            onDragLeave={() => {
-              if (draggingTrackId) {
-                setDragOverTrackId(null);
-              }
-            }}
-            onDrop={(e) => {
-              if (draggingTrackId) {
-                handleTrackHeaderDrop(e, track);
-              } else {
-                handleDropOnTrack(e, track);
-              }
-            }}
-          >
-            {/* Track Header */}
-            <div
-              className={`timeline-track__header ${draggingTrackId === track.id ? 'timeline-track__header--dragging' : ''} ${dragOverTrackId === track.id ? 'timeline-track__header--dragover' : ''}`}
-              draggable
-              onDragStart={(e) => handleTrackHeaderDragStart(e, track)}
-              onDragOver={(e) => handleTrackHeaderDragOver(e, track)}
-              onDragLeave={handleTrackHeaderDragLeave}
-              onDrop={(e) => handleTrackHeaderDrop(e, track)}
-              onDragEnd={handleTrackHeaderDragEnd}
-              onContextMenu={(e) => handleTrackHeaderContextMenu(e, track)}
-            >
-              <div
-                className="timeline-track__header-color"
-                style={{ background: track.color }}
-              />
-              <span className="timeline-track__header-name">{track.name}</span>
-              <span className="timeline-track__header-icon" title="Drag header to reorder layer hierarchy" style={{ cursor: 'grab' }}>
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M20 9H4v2h16V9zM4 15h16v-2H4v2z"/></svg>
-              </span>
-            </div>
+            ref={playheadRef}
+            className="timeline-playhead"
+            style={{ left: `${playheadX}px` }}
+          />
 
-            {/* Track Content */}
+          {tracks.map(track => (
             <div
-              className="timeline-track__content"
-              style={{
-                '--pixels-per-second': pixelsPerSecond,
-                minWidth: timelineWidth,
+              key={track.id}
+              data-track-id={track.id}
+              className={`timeline-track ${track.type === 'audio' ? 'timeline-track--audio' : ''} ${dragOverTrackId === track.id ? 'timeline-track--dragover' : ''}`}
+              onDragOver={(e) => {
+                if (draggingTrackId) {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  setDragOverTrackId(track.id);
+                } else {
+                  handleDragOver(e);
+                }
+              }}
+              onDragLeave={() => {
+                if (draggingTrackId) {
+                  setDragOverTrackId(null);
+                }
+              }}
+              onDrop={(e) => {
+                if (draggingTrackId) {
+                  handleTrackHeaderDrop(e, track);
+                } else {
+                  handleDropOnTrack(e, track);
+                }
               }}
             >
-              {track.type === 'audio' && state.audioFile && (
-                <div className="audio-waveform" style={{ width: `${timelineWidth}px` }}>
-                  <AudioWaveformCanvas
-                    audioBuffer={state.audioBuffer}
-                    width={timelineWidth}
-                    height={52}
-                    color={track.color}
-                  />
-                </div>
-              )}
-
-              {track.clips.map(clip => (
+              {/* Track Header */}
+              <div
+                className={`timeline-track__header ${draggingTrackId === track.id ? 'timeline-track__header--dragging' : ''} ${dragOverTrackId === track.id ? 'timeline-track__header--dragover' : ''}`}
+                draggable
+                onDragStart={(e) => handleTrackHeaderDragStart(e, track)}
+                onDragOver={(e) => handleTrackHeaderDragOver(e, track)}
+                onDragLeave={handleTrackHeaderDragLeave}
+                onDrop={(e) => handleTrackHeaderDrop(e, track)}
+                onDragEnd={handleTrackHeaderDragEnd}
+                onContextMenu={(e) => handleTrackHeaderContextMenu(e, track)}
+              >
                 <div
-                  key={clip.id}
-                  className={`timeline-clip ${state.selectedClipId === clip.id ? 'timeline-clip--selected' : ''}`}
-                  style={{
-                    left: `${clip.startTime * pixelsPerSecond}px`,
-                    width: `${Math.max(20, clip.duration * pixelsPerSecond)}px`,
-                    background: clip.isExtracted
-                      ? `repeating-linear-gradient(45deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 6px, transparent 6px, transparent 12px), linear-gradient(135deg, ${clip.color}dd, ${clip.color}aa)`
-                      : track.type === 'captions'
-                      ? `repeating-linear-gradient(45deg, rgba(255,255,255,0.12) 0px, rgba(255,255,255,0.12) 6px, transparent 6px, transparent 12px), linear-gradient(135deg, ${clip.color}dd, ${clip.color}aa)`
-                      : `linear-gradient(135deg, ${clip.color}cc, ${clip.color}88)`,
-                    cursor: state.activeTool === 'cut' ? 'crosshair' : 'grab',
-                  }}
-                  onMouseDown={(e) => handleClipMouseDown(e, clip, track.id)}
-                  onContextMenu={(e) => handleClipContextMenu(e, clip, track.id)}
-                >
-                  <div
-                    className="timeline-clip__handle timeline-clip__handle--left"
-                    onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'left')}
-                  />
-                  <span className="timeline-clip__label">{clip.name}</span>
-                  <div
-                    className="timeline-clip__handle timeline-clip__handle--right"
-                    onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'right')}
-                  />
-                </div>
-              ))}
+                  className="timeline-track__header-color"
+                  style={{ background: track.color }}
+                />
+                <span className="timeline-track__header-name">{track.name}</span>
+                <span className="timeline-track__header-icon" title="Drag header to reorder layer hierarchy" style={{ cursor: 'grab' }}>
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M20 9H4v2h16V9zM4 15h16v-2H4v2z"/></svg>
+                </span>
+              </div>
 
-              {/* Rhombus Keyframe markers on the track row */}
-              {track.type === 'character' && (() => {
-                const char = state.characters.find(c => c.id === track.characterId);
-                if (char && char.keyframingEnabled && char.keyframes) {
-                  return char.keyframes.map((kf, kfIdx) => {
-                    const leftPos = kf.time * pixelsPerSecond;
-                    const isSelected = state.selectedKeyframeIndex === kfIdx && state.selectedElementId === char.id;
-                    return (
-                      <div
-                        key={kfIdx}
-                        className="timeline-keyframe-marker"
-                        style={{
-                          position: 'absolute',
-                          left: `${leftPos}px`,
-                          top: '50%',
-                          transform: 'translate(-50%, -50%) rotate(45deg)',
-                          width: 11,
-                          height: 11,
-                          backgroundColor: isSelected ? '#ff4081' : '#ffffff',
-                          border: `2px solid ${isSelected ? '#ffffff' : 'var(--accent-primary)'}`,
-                          zIndex: 10,
-                          cursor: 'pointer',
-                          pointerEvents: 'auto',
-                          boxShadow: '0 0 6px rgba(0,0,0,0.8)',
-                        }}
-                        title={`Keyframe at ${kf.time}s`}
-                        onMouseDown={(e) => {
-                          e.stopPropagation();
-                          actions.selectElement(char.id);
-                          actions.selectKeyframe(kfIdx);
-                          actions.setCurrentTime(kf.time);
-                        }}
-                      />
-                    );
-                  });
-                }
-                return null;
-              })()}
+              {/* Track Content */}
+              <div
+                className="timeline-track__content"
+                style={{
+                  '--pixels-per-second': pixelsPerSecond,
+                  minWidth: timelineWidth,
+                }}
+              >
+                {track.type === 'audio' && state.audioFile && (
+                  <div className="audio-waveform" style={{ width: `${timelineWidth}px` }}>
+                    <AudioWaveformCanvas
+                      audioBuffer={state.audioBuffer}
+                      width={timelineWidth}
+                      height={52}
+                      color={track.color}
+                    />
+                  </div>
+                )}
+
+                {track.clips.map(clip => (
+                  <div
+                    key={clip.id}
+                    className={`timeline-clip ${state.selectedClipId === clip.id ? 'timeline-clip--selected' : ''}`}
+                    style={{
+                      left: `${clip.startTime * pixelsPerSecond}px`,
+                      width: `${Math.max(20, clip.duration * pixelsPerSecond)}px`,
+                      background: clip.isExtracted
+                        ? `repeating-linear-gradient(45deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 6px, transparent 6px, transparent 12px), linear-gradient(135deg, ${clip.color}dd, ${clip.color}aa)`
+                        : track.type === 'captions'
+                        ? `repeating-linear-gradient(45deg, rgba(255,255,255,0.12) 0px, rgba(255,255,255,0.12) 6px, transparent 6px, transparent 12px), linear-gradient(135deg, ${clip.color}dd, ${clip.color}aa)`
+                        : `linear-gradient(135deg, ${clip.color}cc, ${clip.color}88)`,
+                      cursor: state.activeTool === 'cut' ? 'crosshair' : 'grab',
+                    }}
+                    onMouseDown={(e) => handleClipMouseDown(e, clip, track.id)}
+                    onContextMenu={(e) => handleClipContextMenu(e, clip, track.id)}
+                  >
+                    <div
+                      className="timeline-clip__handle timeline-clip__handle--left"
+                      onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'left')}
+                    />
+                    <span className="timeline-clip__label">{clip.name}</span>
+                    <div
+                      className="timeline-clip__handle timeline-clip__handle--right"
+                      onMouseDown={(e) => handleResizeMouseDown(e, clip, track.id, 'right')}
+                    />
+                  </div>
+                ))}
+
+                {/* Rhombus Keyframe markers on the track row */}
+                {track.type === 'character' && (() => {
+                  const char = state.characters.find(c => c.id === track.characterId);
+                  if (char && char.keyframingEnabled && char.keyframes) {
+                    return char.keyframes.map((kf, kfIdx) => {
+                      const leftPos = kf.time * pixelsPerSecond;
+                      const isSelected = state.selectedKeyframeIndex === kfIdx && state.selectedElementId === char.id;
+                      return (
+                        <div
+                          key={kfIdx}
+                          className="timeline-keyframe-marker"
+                          style={{
+                            position: 'absolute',
+                            left: `${leftPos}px`,
+                            top: '50%',
+                            transform: 'translate(-50%, -50%) rotate(45deg)',
+                            width: 11,
+                            height: 11,
+                            backgroundColor: isSelected ? '#ff4081' : '#ffffff',
+                            border: `2px solid ${isSelected ? '#ffffff' : 'var(--accent-primary)'}`,
+                            zIndex: 10,
+                            cursor: 'pointer',
+                            pointerEvents: 'auto',
+                            boxShadow: '0 0 6px rgba(0,0,0,0.8)',
+                          }}
+                          title={`Keyframe at ${kf.time}s`}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            actions.selectElement(char.id);
+                            actions.selectKeyframe(kfIdx);
+                            actions.setCurrentTime(kf.time);
+                          }}
+                        />
+                      );
+                    });
+                  }
+                  return null;
+                })()}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
 
-        {/* Empty state */}
-        {tracks.length === 0 && (
-          <div style={{
-            padding: '40px', textAlign: 'center',
-            color: 'var(--text-disabled)', fontSize: 'var(--text-sm)',
-          }}>
-            Parse a script to generate timeline tracks
-          </div>
-        )}
+          {/* Empty state */}
+          {tracks.length === 0 && (
+            <div style={{
+              padding: '40px', textAlign: 'center',
+              color: 'var(--text-disabled)', fontSize: 'var(--text-sm)',
+            }}>
+              Parse a script to generate timeline tracks
+            </div>
+          )}
+        </div>
       </div>
 
       {clipContextMenu && (

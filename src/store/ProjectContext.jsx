@@ -488,9 +488,24 @@ function coreProjectReducer(state, action) {
         clips: [],
       };
       
+      const rawTracks = [...state.tracks, newTrack];
+      rawTracks.sort((a, b) => {
+        const isOverlayA = a.type === 'broll' || a.type === 'window';
+        const isOverlayB = b.type === 'broll' || b.type === 'window';
+        if (isOverlayA && !isOverlayB) return -1;
+        if (!isOverlayA && isOverlayB) return 1;
+        
+        const idxA = state.tracks.findIndex(t => t.id === a.id);
+        const idxB = state.tracks.findIndex(t => t.id === b.id);
+        if (idxA === -1 && idxB === -1) return 0;
+        if (idxA === -1) return 1;
+        if (idxB === -1) return -1;
+        return idxA - idxB;
+      });
+
       const nextState = {
         ...state,
-        tracks: [...state.tracks, newTrack],
+        tracks: rawTracks,
       };
       
       if (type === 'broll' && state.brollLayout === 'none') {
@@ -560,6 +575,52 @@ function coreProjectReducer(state, action) {
     
     case ActionTypes.UPDATE_CLIP_TIMING: {
       const { trackId, clipId, startTime, duration } = action.payload;
+      
+      const track = state.tracks.find(t => t.id === trackId);
+      if (!track) return state;
+      const targetClip = track.clips.find(c => c.id === clipId);
+      if (!targetClip) return state;
+
+      const origStartTime = targetClip.startTime;
+      const origDuration = targetClip.duration;
+      const otherClips = track.clips.filter(c => c.id !== clipId);
+
+      let finalStartTime = startTime ?? origStartTime;
+      let finalDuration = duration ?? origDuration;
+
+      if (startTime !== undefined && duration === undefined) {
+        // Dragging / Moving (duration remains constant)
+        const precedingClips = otherClips.filter(c => c.startTime + c.duration <= origStartTime);
+        const succeedingClips = otherClips.filter(c => c.startTime >= origStartTime + origDuration);
+
+        const prevClipLimit = precedingClips.length > 0
+          ? Math.max(...precedingClips.map(c => c.startTime + c.duration))
+          : 0;
+        const nextClipLimit = succeedingClips.length > 0
+          ? Math.min(...succeedingClips.map(c => c.startTime))
+          : state.totalDuration;
+
+        finalStartTime = Math.max(prevClipLimit, Math.min(nextClipLimit - finalDuration, startTime));
+      } else if (startTime !== undefined && duration !== undefined) {
+        // Resizing left side
+        const precedingClips = otherClips.filter(c => c.startTime + c.duration <= origStartTime);
+        const prevClipLimit = precedingClips.length > 0
+          ? Math.max(...precedingClips.map(c => c.startTime + c.duration))
+          : 0;
+        
+        const origRightEdge = origStartTime + origDuration;
+        finalStartTime = Math.max(prevClipLimit, Math.min(origRightEdge - 0.2, startTime));
+        finalDuration = origRightEdge - finalStartTime;
+      } else if (startTime === undefined && duration !== undefined) {
+        // Resizing right side
+        const succeedingClips = otherClips.filter(c => c.startTime >= origStartTime + origDuration);
+        const nextClipLimit = succeedingClips.length > 0
+          ? Math.min(...succeedingClips.map(c => c.startTime))
+          : state.totalDuration;
+        
+        finalDuration = Math.max(0.2, Math.min(nextClipLimit - origStartTime, duration));
+      }
+
       const isCharTrack = trackId.startsWith('track_') && trackId !== 'track_captions' && !trackId.startsWith('track_bg') && !trackId.startsWith('track_audio');
       let characterPresenceClips = state.characterPresenceClips || [];
       if (isCharTrack) {
@@ -567,21 +628,21 @@ function coreProjectReducer(state, action) {
           if (clip.id !== clipId) return clip;
           return {
             ...clip,
-            startTime: startTime ?? clip.startTime,
-            duration: duration ?? clip.duration,
+            startTime: finalStartTime,
+            duration: finalDuration,
           };
         });
       }
-      const tracks = state.tracks.map(track => {
-        if (track.id !== trackId) return track;
+      const tracks = state.tracks.map(t => {
+        if (t.id !== trackId) return t;
         return {
-          ...track,
-          clips: track.clips.map(clip => {
+          ...t,
+          clips: t.clips.map(clip => {
             if (clip.id !== clipId) return clip;
             return {
               ...clip,
-              startTime: startTime ?? clip.startTime,
-              duration: duration ?? clip.duration,
+              startTime: finalStartTime,
+              duration: finalDuration,
               isDefaultDuration: false,
             };
           }),
