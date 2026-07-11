@@ -201,9 +201,27 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
     ctx.fillRect(0, 0, width, height);
   }
 
-  // Draw tracks in reverse order (bottom to top on timeline)
-  const reversedTracks = [...state.tracks].reverse();
-  reversedTracks.forEach(track => {
+  // Sort tracks for rendering order (bottom-most visual layer to top-most visual layer)
+  const renderOrderTracks = [];
+  
+  // 1. Video tracks first (background layer)
+  state.tracks.forEach(t => {
+    if (t.type === 'video') renderOrderTracks.push(t);
+  });
+  // 2. Character tracks second (middle layer)
+  state.tracks.forEach(t => {
+    if (t.type === 'character') renderOrderTracks.push(t);
+  });
+  // 3. B-Roll and Window overlay tracks third (above characters)
+  state.tracks.forEach(t => {
+    if (t.type === 'broll' || t.type === 'window') renderOrderTracks.push(t);
+  });
+  // 4. Captions track last (very top)
+  state.tracks.forEach(t => {
+    if (t.type === 'captions') renderOrderTracks.push(t);
+  });
+
+  renderOrderTracks.forEach(track => {
     if (track.type === 'video') {
       if (transparentBackground) return;
       const activeClip = track.clips.find(clip => time >= clip.startTime && time < clip.startTime + clip.duration);
@@ -307,21 +325,24 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
 
         ctx.restore();
 
-        ctx.save();
-        ctx.strokeStyle = '#ffd740'; // Gold border for slideshow window
-        ctx.lineWidth = 3 * scaleFactor;
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-        ctx.shadowBlur = 12 * scaleFactor;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 4 * scaleFactor;
-        ctx.beginPath();
-        if (ctx.roundRect) {
-          ctx.roundRect(drawX, drawY, drawW, drawH, 12 * scaleFactor);
-        } else {
-          ctx.rect(drawX, drawY, drawW, drawH);
+        const hasSelectedClip = track.clips.some(c => c.id === state.selectedClipId);
+        if (drawHandles && (state.selectedElementId === track.id || hasSelectedClip)) {
+          ctx.save();
+          ctx.strokeStyle = '#ffd740'; // Gold border for slideshow window
+          ctx.lineWidth = 3 * scaleFactor;
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+          ctx.shadowBlur = 12 * scaleFactor;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 4 * scaleFactor;
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(drawX, drawY, drawW, drawH, 12 * scaleFactor);
+          } else {
+            ctx.rect(drawX, drawY, drawW, drawH);
+          }
+          ctx.stroke();
+          ctx.restore();
         }
-        ctx.stroke();
-        ctx.restore();
       }
     } else if (track.type === 'broll') {
       if (state.brollLayout === 'none') return;
@@ -414,21 +435,24 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
       ctx.restore();
 
       if (isPip) {
-        ctx.save();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-        ctx.lineWidth = 3 * scaleFactor;
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-        ctx.shadowBlur = 12 * scaleFactor;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 4 * scaleFactor;
-        ctx.beginPath();
-        if (ctx.roundRect) {
-          ctx.roundRect(drawX, drawY, drawW, drawH, 12 * scaleFactor);
-        } else {
-          ctx.rect(drawX, drawY, drawW, drawH);
+        const hasSelectedClip = track.clips.some(c => c.id === state.selectedClipId);
+        if (drawHandles && (state.selectedElementId === track.id || hasSelectedClip)) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+          ctx.lineWidth = 3 * scaleFactor;
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+          ctx.shadowBlur = 12 * scaleFactor;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 4 * scaleFactor;
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(drawX, drawY, drawW, drawH, 12 * scaleFactor);
+          } else {
+            ctx.rect(drawX, drawY, drawW, drawH);
+          }
+          ctx.stroke();
+          ctx.restore();
         }
-        ctx.stroke();
-        ctx.restore();
       } else if (state.brollLayout === 'split') {
         ctx.save();
         ctx.strokeStyle = '#ffd21e';
@@ -724,10 +748,11 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
     }
   });
 
-  // 4. Draw selection handles in editor preview mode
   if (drawHandles && state.selectedElementId) {
     let cx, cy, w, h;
     const isCaption = state.selectedElementId.startsWith('caption_');
+    const isBroll = state.selectedElementId.includes('broll') || state.selectedElementId === 'broll';
+    const isWindow = state.selectedElementId.includes('window') || state.selectedElementId === 'window';
 
     // Draw motion path (After Effects style) for keyframed characters
     const motionChar = isCaption ? null : state.characters.find(c => c.id === state.selectedElementId);
@@ -774,7 +799,17 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
       ctx.restore();
     }
     
-    if (isCaption) {
+    if (isBroll || isWindow) {
+      const bX = isBroll ? (state.brollX !== undefined ? state.brollX : 50) : 50;
+      const bY = isBroll ? (state.brollY !== undefined ? state.brollY : 20) : 20;
+      const bW = isBroll ? (state.brollWidth !== undefined ? state.brollWidth : 80) : 90;
+      const bH = isBroll ? (state.brollHeight !== undefined ? state.brollHeight : 25) : 30;
+
+      cx = width * (bX / 100);
+      cy = height * (bY / 100);
+      w = width * (bW / 100);
+      h = height * (bH / 100);
+    } else if (isCaption) {
       const charId = state.selectedElementId.replace('caption_', '');
       const block = activeBlocks.find(b => b.characterId === charId);
       const char = state.characters.find(c => c.id === charId);
@@ -920,7 +955,7 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
 
       } else {
         // Draw rotation handle for standard mode
-        if (!isCaption && transformMode !== 'skew') {
+        if (!isCaption && !isBroll && !isWindow && transformMode !== 'skew') {
           ctx.beginPath();
           ctx.moveTo(0, -h / 2);
           ctx.lineTo(0, -h / 2 - 24);

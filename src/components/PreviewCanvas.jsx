@@ -67,10 +67,10 @@ export default function PreviewCanvas() {
     });
   }, [state.characters]);
 
-  // Preload timeline images (for image clips on video & broll tracks)
+  // Preload timeline images (for image clips on video, broll, & window tracks)
   useEffect(() => {
     state.tracks.forEach(track => {
-      if (track.type === 'video' || track.type === 'broll') {
+      if (track.type === 'video' || track.type === 'broll' || track.type === 'window') {
         track.clips.forEach(clip => {
           if (clip.type === 'image' && clip.dataUrl && !loadedImagesRef.current[clip.id]) {
             const img = new Image();
@@ -146,7 +146,7 @@ export default function PreviewCanvas() {
   // ── Sync multi-track video playback and seek ──
   useEffect(() => {
     const videoClips = state.tracks
-      .filter(t => t.type === 'video')
+      .filter(t => t.type === 'video' || t.type === 'broll' || t.type === 'window')
       .flatMap(t => t.clips)
       .filter(c => c.type === 'video');
 
@@ -460,16 +460,29 @@ export default function PreviewCanvas() {
 
     // 1. Check if clicking on the resize handle of the currently selected element
     if (state.selectedElementId) {
-      let cx, cy, w, h;
-      const isCaption = state.selectedElementId.startsWith('caption_');
-      let currentTransform = state.characterTransforms[state.selectedElementId] || {
-        x: state.canvasWidth / 2,
-        y: isCaption ? state.canvasHeight * 0.85 : state.canvasHeight * 0.65,
-        scale: 1,
-        rotation: 0,
-      };
+      const isBroll = state.selectedElementId.includes('broll') || state.selectedElementId === 'broll';
+      const isWindow = state.selectedElementId.includes('window') || state.selectedElementId === 'window';
 
-      if (!isCaption) {
+      let currentTransform = (isBroll || isWindow)
+        ? {
+            x: isBroll ? (state.brollX !== undefined ? state.brollX : 50) : 50,
+            y: isBroll ? (state.brollY !== undefined ? state.brollY : 20) : 20,
+            width: isBroll ? (state.brollWidth !== undefined ? state.brollWidth : 80) : 90,
+            height: isBroll ? (state.brollHeight !== undefined ? state.brollHeight : 25) : 30,
+          }
+        : state.characterTransforms[state.selectedElementId] || {
+            x: state.canvasWidth / 2,
+            y: isCaption ? state.canvasHeight * 0.85 : state.canvasHeight * 0.65,
+            scale: 1,
+            rotation: 0,
+          };
+
+      if (isBroll || isWindow) {
+        cx = canvasSize.width * (currentTransform.x / 100);
+        cy = canvasSize.height * (currentTransform.y / 100);
+        w = canvasSize.width * (currentTransform.width / 100);
+        h = canvasSize.height * (currentTransform.height / 100);
+      } else if (!isCaption) {
         const char = state.characters.find(c => c.id === state.selectedElementId);
         if (char && char.keyframingEnabled && char.keyframes?.length > 0) {
           currentTransform = getInterpolatedKeyframeTransform(char.keyframes, state.currentTime);
@@ -836,7 +849,50 @@ export default function PreviewCanvas() {
         });
       }
     } else {
-      actions.selectElement(null);
+      let clickedOverlayTrack = null;
+      const overlayTracks = state.tracks.filter(t => t.type === 'broll' || t.type === 'window');
+      for (const track of overlayTracks) {
+        const activeClip = track.clips.find(c => state.currentTime >= c.startTime && state.currentTime <= c.startTime + c.duration);
+        const isBroll = track.type === 'broll';
+        
+        if (activeClip || state.selectedElementId === track.id) {
+          const bX = isBroll ? (state.brollX !== undefined ? state.brollX : 50) : 50;
+          const bY = isBroll ? (state.brollY !== undefined ? state.brollY : 20) : 20;
+          const bW = isBroll ? (state.brollWidth !== undefined ? state.brollWidth : 80) : 90;
+          const bH = isBroll ? (state.brollHeight !== undefined ? state.brollHeight : 25) : 30;
+
+          const cx = canvasSize.width * (bX / 100);
+          const cy = canvasSize.height * (bY / 100);
+          const w = canvasSize.width * (bW / 100);
+          const h = canvasSize.height * (bH / 100);
+
+          const rx = cx - w / 2;
+          const ry = cy - h / 2;
+
+          if (x >= rx && x <= rx + w && y >= ry && y <= ry + h) {
+            clickedOverlayTrack = track;
+            actions.selectElement(track.id);
+            actions.startDragHistory();
+            setDragging({
+              type: 'move',
+              elementId: track.id,
+              startX: x,
+              startY: y,
+              origTransform: {
+                x: bX,
+                y: bY,
+                width: bW,
+                height: bH,
+              },
+            });
+            break;
+          }
+        }
+      }
+      
+      if (!clickedOverlayTrack) {
+        actions.selectElement(null);
+      }
     }
   };
 
@@ -905,49 +961,103 @@ export default function PreviewCanvas() {
     }
 
     if (dragging.type === 'resize') {
-      const currentDist = Math.sqrt((x - dragging.cx) ** 2 + (y - dragging.cy) ** 2);
-      const newScale = Math.max(0.2, Math.min(3, dragging.origTransform.scale * (currentDist / dragging.origDist)));
-      
-      const isCaption = dragging.elementId.startsWith('caption_');
-      const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
-      if (char && char.keyframingEnabled) {
-        const newTransform = {
-          ...dragging.origTransform,
-          scale: newScale,
-        };
-        actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
-      } else {
-        actions.setCharacterTransform(dragging.elementId, {
-          ...dragging.origTransform,
-          scale: newScale,
+      const isBroll = dragging.elementId.includes('broll') || dragging.elementId === 'broll';
+      const isWindow = dragging.elementId.includes('window') || dragging.elementId === 'window';
+
+      if (isBroll || isWindow) {
+        const currentDist = Math.sqrt((x - dragging.cx) ** 2 + (y - dragging.cy) ** 2);
+        const ratio = currentDist / dragging.origDist;
+        const aspect = state.brollAspectRatio || 'custom';
+        
+        let origW = dragging.origTransform.width !== undefined ? dragging.origTransform.width : (isBroll ? 80 : 90);
+        let origH = dragging.origTransform.height !== undefined ? dragging.origTransform.height : (isBroll ? 25 : 30);
+        
+        let newW = Math.max(5, Math.min(100, origW * ratio));
+        let newH = Math.max(5, Math.min(100, origH * ratio));
+
+        if (aspect !== 'custom') {
+          let val = 16/9;
+          if (aspect === '9:16') val = 9/16;
+          else if (aspect === '1:1') val = 1/1;
+          else if (aspect === '4:3') val = 4/3;
+
+          const wPx = state.canvasWidth * (newW / 100);
+          const hPx = wPx / val;
+          newH = Math.max(5, Math.min(100, (hPx / state.canvasHeight) * 100));
+        }
+
+        actions.setBrollSettings({
+          x: state.brollX !== undefined ? state.brollX : 50,
+          y: state.brollY !== undefined ? state.brollY : 20,
+          width: Math.round(newW * 10) / 10,
+          height: Math.round(newH * 10) / 10,
+          aspectRatio: aspect,
         });
+      } else {
+        const currentDist = Math.sqrt((x - dragging.cx) ** 2 + (y - dragging.cy) ** 2);
+        const newScale = Math.max(0.2, Math.min(3, dragging.origTransform.scale * (currentDist / dragging.origDist)));
+        
+        const isCaption = dragging.elementId.startsWith('caption_');
+        const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
+        if (char && char.keyframingEnabled) {
+          const newTransform = {
+            ...dragging.origTransform,
+            scale: newScale,
+          };
+          actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
+        } else {
+          actions.setCharacterTransform(dragging.elementId, {
+            ...dragging.origTransform,
+            scale: newScale,
+          });
+        }
       }
     } else if (dragging.type === 'move') {
-      const dx = x - dragging.startX;
-      const dy = y - dragging.startY;
-      const newX = dragging.origTransform.x + dx / scaleFactor;
-      const adjustedDy = state.brollLayout === 'split' ? (dy / 0.55) : dy;
-      const newY = dragging.origTransform.y + adjustedDy / scaleFactor;
+      const isBroll = dragging.elementId.includes('broll') || dragging.elementId === 'broll';
+      const isWindow = dragging.elementId.includes('window') || dragging.elementId === 'window';
 
-      const isCaption = dragging.elementId.startsWith('caption_');
-      const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
-      if (char && char.keyframingEnabled) {
-        const newTransform = {
-          ...dragging.origTransform,
-          x: newX,
-          y: newY,
-        };
-        if (dragging.keyframeIndex !== undefined) {
-          actions.updateCharacterKeyframe(char.id, dragging.keyframeIndex, newTransform);
-        } else {
-          actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
-        }
-      } else {
-        actions.setCharacterTransform(dragging.elementId, {
-          ...dragging.origTransform,
-          x: newX,
-          y: newY,
+      if (isBroll || isWindow) {
+        const dx = x - dragging.startX;
+        const dy = y - dragging.startY;
+        const dxPct = (dx / canvasSize.width) * 100;
+        const dyPct = (dy / canvasSize.height) * 100;
+        const newX = Math.max(0, Math.min(100, dragging.origTransform.x + dxPct));
+        const newY = Math.max(0, Math.min(100, dragging.origTransform.y + dyPct));
+
+        actions.setBrollSettings({
+          x: Math.round(newX * 10) / 10,
+          y: Math.round(newY * 10) / 10,
+          width: state.brollWidth !== undefined ? state.brollWidth : 80,
+          height: state.brollHeight !== undefined ? state.brollHeight : 25,
+          aspectRatio: state.brollAspectRatio || 'custom',
         });
+      } else {
+        const dx = x - dragging.startX;
+        const dy = y - dragging.startY;
+        const newX = dragging.origTransform.x + dx / scaleFactor;
+        const adjustedDy = state.brollLayout === 'split' ? (dy / 0.55) : dy;
+        const newY = dragging.origTransform.y + adjustedDy / scaleFactor;
+
+        const isCaption = dragging.elementId.startsWith('caption_');
+        const char = isCaption ? null : state.characters.find(c => c.id === dragging.elementId);
+        if (char && char.keyframingEnabled) {
+          const newTransform = {
+            ...dragging.origTransform,
+            x: newX,
+            y: newY,
+          };
+          if (dragging.keyframeIndex !== undefined) {
+            actions.updateCharacterKeyframe(char.id, dragging.keyframeIndex, newTransform);
+          } else {
+            actions.addCharacterKeyframe(char.id, state.currentTime, newTransform);
+          }
+        } else {
+          actions.setCharacterTransform(dragging.elementId, {
+            ...dragging.origTransform,
+            x: newX,
+            y: newY,
+          });
+        }
       }
     } else if (dragging.type === 'rotate') {
       const angle = Math.atan2(y - dragging.cy, x - dragging.cx) * 180 / Math.PI;
