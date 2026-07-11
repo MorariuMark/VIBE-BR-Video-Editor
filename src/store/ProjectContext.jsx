@@ -47,6 +47,7 @@ const initialState = {
   brollWidth: 80,
   brollHeight: 25,
   brollAspectRatio: 'custom',
+  windowSlideshowEnabled: false,
   
   // Export
   isExporting: false,
@@ -149,6 +150,7 @@ const ActionTypes = {
   EXTRACT_AUDIO: 'EXTRACT_AUDIO',
   SET_BROLL_LAYOUT: 'SET_BROLL_LAYOUT',
   SET_BROLL_SETTINGS: 'SET_BROLL_SETTINGS',
+  SET_WINDOW_SLIDESHOW_ENABLED: 'SET_WINDOW_SLIDESHOW_ENABLED',
 };
 
 // ─── Helpers ───
@@ -1076,6 +1078,8 @@ function coreProjectReducer(state, action) {
         type: 'audio',
         volume: 1.0,
         speed: videoClip.speed ?? 1.0,
+        color: '#00e676', // Green color for visual block
+        isExtracted: true, // Stripe texture marker
       };
       
       const newAudioTrack = {
@@ -1086,7 +1090,15 @@ function coreProjectReducer(state, action) {
         clips: [newAudioClip],
       };
       
-      return { ...state, tracks: [...updatedTracks, newAudioTrack] };
+      const vIdx = updatedTracks.findIndex(t => t.id === videoTrackId);
+      let finalTracks = [...updatedTracks];
+      if (vIdx !== -1) {
+        finalTracks.splice(vIdx + 1, 0, newAudioTrack);
+      } else {
+        finalTracks.push(newAudioTrack);
+      }
+      
+      return { ...state, tracks: finalTracks };
     }
 
     case ActionTypes.SET_BROLL_LAYOUT: {
@@ -1130,6 +1142,33 @@ function coreProjectReducer(state, action) {
         brollWidth: width,
         brollHeight: height,
         brollAspectRatio: aspectRatio,
+      };
+    }
+
+    case ActionTypes.SET_WINDOW_SLIDESHOW_ENABLED: {
+      const enabled = action.payload;
+      let tracks = [...state.tracks];
+      
+      if (!enabled) {
+        tracks = tracks.filter(t => t.type !== 'window');
+      } else {
+        const hasWindow = tracks.some(t => t.type === 'window');
+        if (!hasWindow) {
+          const newWindowTrack = {
+            id: 'track_window_slideshow',
+            name: 'Window Slideshow',
+            type: 'window',
+            color: '#ffd740',
+            clips: [],
+          };
+          tracks = [newWindowTrack, ...tracks];
+        }
+      }
+      
+      return {
+        ...state,
+        windowSlideshowEnabled: enabled,
+        tracks,
       };
     }
 
@@ -1180,6 +1219,7 @@ const UNDOABLE_ACTIONS = new Set([
   'EXTRACT_AUDIO',
   'SET_BROLL_LAYOUT',
   'SET_BROLL_SETTINGS',
+  'SET_WINDOW_SLIDESHOW_ENABLED',
 ]);
 
 function getHumanReadableActionName(actionType) {
@@ -1222,6 +1262,7 @@ function getHumanReadableActionName(actionType) {
     EXTRACT_AUDIO: 'Extract Audio from Video',
     SET_BROLL_LAYOUT: 'Change B-Roll Layout',
     SET_BROLL_SETTINGS: 'Change B-Roll Settings',
+    SET_WINDOW_SLIDESHOW_ENABLED: 'Toggle Window Slideshow',
   };
   return map[actionType] || actionType;
 }
@@ -1246,6 +1287,7 @@ function getProjectSnapshot(state) {
     brollWidth: state.brollWidth,
     brollHeight: state.brollHeight,
     brollAspectRatio: state.brollAspectRatio,
+    windowSlideshowEnabled: state.windowSlideshowEnabled,
   };
 }
 
@@ -1531,12 +1573,28 @@ function generateTracksFromBlocks(blocks, characters, state) {
   };
 
   // Combined tracks
-  const combined = [captionsTrack, ...charTracks, ...syncedUserTracks];
+  let combined = [captionsTrack, ...charTracks, ...syncedUserTracks];
+  if (state.windowSlideshowEnabled) {
+    let windowTrack = (state.tracks || []).find(t => t.type === 'window');
+    if (!windowTrack) {
+      windowTrack = {
+        id: 'track_window_slideshow',
+        name: 'Window Slideshow',
+        type: 'window',
+        color: '#ffd740',
+        clips: [],
+      };
+    }
+    combined = [windowTrack, ...combined];
+  }
   
   // Sort tracks by existing order if available
   if (state.tracks && state.tracks.length > 0) {
     const existingIds = state.tracks.map(t => t.id);
     combined.sort((a, b) => {
+      if (a.id === 'track_window_slideshow') return -1;
+      if (b.id === 'track_window_slideshow') return 1;
+      
       const idxA = existingIds.indexOf(a.id);
       const idxB = existingIds.indexOf(b.id);
       if (idxA === -1 && idxB === -1) return 0;
@@ -1809,6 +1867,10 @@ export function ProjectProvider({ children }) {
 
     setBrollSettings: useCallback((settings) => {
       dispatch({ type: ActionTypes.SET_BROLL_SETTINGS, payload: settings });
+    }, []),
+
+    setWindowSlideshowEnabled: useCallback((enabled) => {
+      dispatch({ type: ActionTypes.SET_WINDOW_SLIDESHOW_ENABLED, payload: enabled });
     }, []),
   };
 

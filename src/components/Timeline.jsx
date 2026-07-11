@@ -878,7 +878,9 @@ export default function Timeline() {
                   style={{
                     left: `${clip.startTime * pixelsPerSecond}px`,
                     width: `${Math.max(20, clip.duration * pixelsPerSecond)}px`,
-                    background: track.type === 'captions'
+                    background: clip.isExtracted
+                      ? `repeating-linear-gradient(45deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 6px, transparent 6px, transparent 12px), linear-gradient(135deg, ${clip.color}dd, ${clip.color}aa)`
+                      : track.type === 'captions'
                       ? `repeating-linear-gradient(45deg, rgba(255,255,255,0.12) 0px, rgba(255,255,255,0.12) 6px, transparent 6px, transparent 12px), linear-gradient(135deg, ${clip.color}dd, ${clip.color}aa)`
                       : `linear-gradient(135deg, ${clip.color}cc, ${clip.color}88)`,
                     cursor: state.activeTool === 'cut' ? 'crosshair' : 'grab',
@@ -1042,10 +1044,20 @@ export default function Timeline() {
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <HoverMenuItem 
+           <HoverMenuItem 
             text={`New ${trackContextMenu.track.type.charAt(0).toUpperCase() + trackContextMenu.track.type.slice(1)} Track Above`} 
             onClick={() => handleAddSpecificTrackAbove(trackContextMenu.track)} 
           />
+          {trackContextMenu.track.type === 'video' && (
+            <HoverMenuItem 
+              text={state.windowSlideshowEnabled ? "Disable Window Slideshow" : "Enable Window Slideshow"} 
+              onClick={() => {
+                actions.setWindowSlideshowEnabled(!state.windowSlideshowEnabled);
+                setTrackContextMenu(null);
+                actions.addToast(!state.windowSlideshowEnabled ? "Enabled Window Slideshow track" : "Disabled Window Slideshow track", "success");
+              }} 
+            />
+          )}
           <HoverMenuItem text="Rename Track..." onClick={handleRenameTrack} />
           <HoverMenuItem text="Delete Track" color="#ff4081" onClick={handleDeleteTrack} />
         </div>

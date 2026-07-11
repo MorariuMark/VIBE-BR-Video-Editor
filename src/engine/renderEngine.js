@@ -248,6 +248,81 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, width, height);
         }
       }
+    } else if (track.type === 'window') {
+      const activeClip = track.clips.find(clip => time >= clip.startTime && time < clip.startTime + clip.duration);
+      if (activeClip) {
+        const drawW = width * 0.9;
+        const drawH = height * 0.3;
+        const drawX = (width - drawW) / 2;
+        const drawY = height * 0.05; // 5% from top
+
+        ctx.save();
+        
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(drawX, drawY, drawW, drawH, 12 * scaleFactor);
+        } else {
+          ctx.rect(drawX, drawY, drawW, drawH);
+        }
+        ctx.clip();
+
+        if (activeClip.type === 'video') {
+          const v = (videoElement && videoElement[activeClip.id]) || 
+                    (activeClip.id === 'clip_bg' && videoElement instanceof HTMLVideoElement ? videoElement : null);
+          if (v && v.readyState >= 2) {
+            const regionRatio = drawW / drawH;
+            const videoRatio = v.videoWidth / v.videoHeight || (state.canvasWidth / state.canvasHeight);
+            
+            let sx = 0, sy = 0, sw = v.videoWidth, sh = v.videoHeight;
+            if (videoRatio > regionRatio) {
+              sw = sh * regionRatio;
+              sx = (v.videoWidth - sw) / 2;
+            } else {
+              sh = sw / regionRatio;
+              sy = (v.videoHeight - sh) / 2;
+            }
+            try {
+              ctx.drawImage(v, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
+            } catch (e) {
+              ctx.drawImage(v, drawX, drawY, drawW, drawH);
+            }
+          }
+        } else if (activeClip.type === 'image') {
+          const img = loadedImages[activeClip.id];
+          if (img) {
+            const regionRatio = drawW / drawH;
+            const imgRatio = img.width / img.height || (state.canvasWidth / state.canvasHeight);
+            
+            let sx = 0, sy = 0, sw = img.width, sh = img.height;
+            if (imgRatio > regionRatio) {
+              sw = sh * regionRatio;
+              sx = (img.width - sw) / 2;
+            } else {
+              sh = sw / regionRatio;
+              sy = (img.height - sh) / 2;
+            }
+            ctx.drawImage(img, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
+          }
+        }
+
+        ctx.restore();
+
+        ctx.save();
+        ctx.strokeStyle = '#ffd740'; // Gold border for slideshow window
+        ctx.lineWidth = 3 * scaleFactor;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowBlur = 12 * scaleFactor;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 4 * scaleFactor;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(drawX, drawY, drawW, drawH, 12 * scaleFactor);
+        } else {
+          ctx.rect(drawX, drawY, drawW, drawH);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
     } else if (track.type === 'broll') {
       if (state.brollLayout === 'none') return;
       const activeClip = track.clips.find(clip => time >= clip.startTime && time < clip.startTime + clip.duration);
