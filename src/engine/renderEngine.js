@@ -871,15 +871,35 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
     }
     
     if (isBroll || isWindow) {
-      const bX = isBroll ? (state.brollX !== undefined ? state.brollX : 50) : 50;
-      const bY = isBroll ? (state.brollY !== undefined ? state.brollY : 20) : 20;
-      const bW = isBroll ? (state.brollWidth !== undefined ? state.brollWidth : 80) : 90;
-      const bH = isBroll ? (state.brollHeight !== undefined ? state.brollHeight : 25) : 30;
+      const transform = state.characterTransforms[state.selectedElementId] || {
+        x: state.canvasWidth * 0.5,
+        y: isWindow ? state.canvasHeight * 0.2 : state.canvasHeight * 0.3,
+        scale: isWindow ? 0.9 : 0.8,
+      };
+      
+      let mediaRatio = 16/9;
+      const track = state.tracks.find(t => t.id === state.selectedElementId);
+      if (track) {
+        const activeClip = track.clips.find(c => time >= c.startTime && time < c.startTime + c.duration);
+        if (activeClip) {
+          if (activeClip.type === 'video') {
+            const v = (videoElement && videoElement[activeClip.id]);
+            if (v && v.videoWidth) {
+              mediaRatio = v.videoWidth / v.videoHeight;
+            }
+          } else if (activeClip.type === 'image') {
+            const img = loadedImages[activeClip.id];
+            if (img && img.width) {
+              mediaRatio = img.width / img.height;
+            }
+          }
+        }
+      }
 
-      cx = width * (bX / 100);
-      cy = height * (bY / 100);
-      w = width * (bW / 100);
-      h = height * (bH / 100);
+      cx = transform.x * scaleFactor;
+      cy = transform.y * scaleFactor;
+      w = 640 * transform.scale * scaleFactor;
+      h = (640 / mediaRatio) * transform.scale * scaleFactor;
     } else if (isCaption) {
       const charId = state.selectedElementId.replace('caption_', '');
       const block = activeBlocks.find(b => b.characterId === charId);
