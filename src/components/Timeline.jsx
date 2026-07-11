@@ -107,6 +107,23 @@ export default function Timeline() {
         } else {
           actions.addToast('Mismatched media type. Drag a video/image file here.', 'warning');
         }
+      } else if (track.type === 'window') {
+        if (item.type === 'video' || item.type === 'image') {
+          const newClip = {
+            id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            name: item.name,
+            startTime,
+            duration: item.duration || 5, // default 5s
+            color: track.color || '#ffd740',
+            path: item.path,
+            dataUrl: item.dataUrl,
+            type: item.type,
+          };
+          actions.addClipToTrack(track.id, newClip);
+          actions.addToast(`Added "${item.name}" to Window slideshow`, 'success');
+        } else {
+          actions.addToast('Mismatched media type. Drag a video/image file here.', 'warning');
+        }
       } else if (track.type === 'audio') {
         if (item.type === 'audio') {
           const newClip = {
