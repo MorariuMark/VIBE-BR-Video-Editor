@@ -10,7 +10,7 @@ import { formatTime, readFileAsDataUrl } from '../utils/fileHelpers';
  */
 export default function ScriptEditor({ onMinimize }) {
   const { state, actions } = useProject();
-  const [activeTab, setActiveTab] = useState('script'); // 'script' | 'dialogue' | 'animations' | 'inspector'
+  const [activeTab, setActiveTab] = useState('script'); // 'script' | 'dialogue' | 'animations' | 'inspector' | 'presets'
   const [editingKeyword, setEditingKeyword] = useState(null);
   const [newKeywordName, setNewKeywordName] = useState('');
   const [styleTarget, setStyleTarget] = useState('character'); // 'character' | 'clip'
@@ -18,6 +18,54 @@ export default function ScriptEditor({ onMinimize }) {
   const [activeProp, setActiveProp] = useState('x'); // 'x' | 'y' | 'scale' | 'rotation' | 'opacity'
   const [draggingKf, setDraggingKf] = useState(null);
   const textareaRef = useRef(null);
+
+  const [customPresets, setCustomPresets] = useState([]);
+  const [newPresetName, setNewPresetName] = useState('');
+  const [defaultPreset, setDefaultPreset] = useState(null);
+
+  useEffect(() => {
+    const initPresets = async () => {
+      if (window.electronAPI) {
+        if (window.electronAPI.loadCharacterPresets) {
+          const list = await window.electronAPI.loadCharacterPresets();
+          setCustomPresets(list || []);
+        }
+
+        const projectPath = await window.electronAPI.getProjectPath();
+        const projectPathNormalized = projectPath.replace(/\\/g, '/');
+        setDefaultPreset({
+          name: 'Peter & Stewie',
+          characters: [
+            {
+              id: 'char_stewie',
+              name: 'Stewie',
+              colorIndex: 0,
+              assetPath: `${projectPathNormalized}/assets/characters/stewie.png`,
+              voice: {
+                type: 'default',
+                refPath: `${projectPathNormalized}/assets/default_voices/stewie_ref.wav`,
+                refText: 'all this time spent keeping people from having sex and now i know how the catholic church feels buzzing',
+                presetName: 'stewie'
+              }
+            },
+            {
+              id: 'char_peter',
+              name: 'Peter',
+              colorIndex: 1,
+              assetPath: `${projectPathNormalized}/assets/characters/peter.png`,
+              voice: {
+                type: 'default',
+                refPath: `${projectPathNormalized}/assets/default_voices/peter_ref.wav`,
+                refText: "I'm gonna stare at his wife's boobs so hide that when they both go into the kitchen together it will be discussed",
+                presetName: 'peter'
+              }
+            }
+          ]
+        });
+      }
+    };
+    initPresets();
+  }, []);
 
   const handleApplyAnimToAll = (characterId) => {
     const block = state.dialogueBlocks.find(b => b.id === state.selectedClipId);
@@ -1818,6 +1866,12 @@ export default function ScriptEditor({ onMinimize }) {
             >
               Inspector
             </button>
+            <button
+              className={`editor-tab ${activeTab === 'presets' ? 'editor-tab--active' : ''}`}
+              onClick={() => setActiveTab('presets')}
+            >
+              Presets
+            </button>
           </div>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 8, height: '100%' }}>
@@ -2124,8 +2178,228 @@ export default function ScriptEditor({ onMinimize }) {
 
           {activeTab === 'animations' && renderAnimations()}
           {activeTab === 'inspector' && renderInspector()}
+          {activeTab === 'presets' && renderPresets()}
         </div>
       </div>
     </div>
   );
+
+  function renderPresets() {
+    return (
+      <div className="inspector-panel" style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '16px', height: '100%', overflowY: 'auto' }}>
+        <div style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '6px', color: 'var(--text-primary)' }}>
+          Preset Templates
+        </div>
+
+        {/* List Presets */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {/* Default Preset */}
+          {defaultPreset && (
+            <div style={{
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border-default)',
+              borderRadius: '6px',
+              padding: '10px 12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 'bold', fontSize: '12px', color: 'var(--accent-primary)' }}>
+                  {defaultPreset.name} (Built-in)
+                </span>
+                <button
+                  className="btn btn--primary"
+                  style={{ padding: '3px 8px', fontSize: '10px', height: '20px', width: 'auto' }}
+                  onClick={() => applyPreset(defaultPreset)}
+                >
+                  Apply
+                </button>
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                Characters: {defaultPreset.characters.map(c => c.name).join(', ')}
+              </div>
+            </div>
+          )}
+
+          {/* Custom User Presets */}
+          {customPresets.map((preset, idx) => (
+            <div key={idx} style={{
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border-default)',
+              borderRadius: '6px',
+              padding: '10px 12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 'bold', fontSize: '12px', color: 'var(--text-primary)' }}>
+                  {preset.name}
+                </span>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button
+                    className="btn btn--primary"
+                    style={{ padding: '3px 8px', fontSize: '10px', height: '20px', width: 'auto' }}
+                    onClick={() => applyPreset(preset)}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    className="btn btn--secondary"
+                    style={{ padding: '3px 6px', fontSize: '10px', height: '20px', width: 'auto', color: 'var(--accent-error, #ff5252)' }}
+                    onClick={() => handleDeletePreset(preset.name)}
+                    title="Delete Preset"
+                  >
+                    🗑
+                  </button>
+                </div>
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                Characters: {preset.characters.map(c => c.name).join(', ')}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Create Preset Form */}
+        <div style={{
+          background: 'var(--surface-1)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: '6px',
+          padding: '12px',
+          marginTop: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px'
+        }}>
+          <div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>
+            Save Current Setup as Preset
+          </div>
+          {state.characters.length === 0 ? (
+            <div style={{ fontSize: '10px', color: 'var(--text-disabled)', fontStyle: 'italic' }}>
+              Add characters to your timeline first to save a custom preset.
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                Saves current timeline setup: <strong>{state.characters.map(c => c.name).join(', ')}</strong>.
+              </div>
+              <input
+                type="text"
+                placeholder="Enter preset name (e.g. My Preset)"
+                value={newPresetName}
+                onChange={(e) => setNewPresetName(e.target.value)}
+                style={{
+                  width: '100%',
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '4px',
+                  padding: '6px 8px',
+                  color: 'var(--text-primary)',
+                  fontSize: '11px',
+                  outline: 'none'
+                }}
+              />
+              <button
+                className="btn btn--secondary"
+                style={{ width: '100%', padding: '6px', fontSize: '11px', fontWeight: 'bold' }}
+                onClick={handleSavePreset}
+              >
+                Save Preset
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  async function applyPreset(preset) {
+    try {
+      actions.addToast(`Applying preset "${preset.name}"...`, 'info');
+      const voiceConfigs = { ...(state.voiceConfigs || {}) };
+
+      for (const charInfo of preset.characters) {
+        const currentCharacters = state.characters;
+        const exists = currentCharacters.some(c => c.id === charInfo.id);
+        if (!exists) {
+          actions.addCharacter(charInfo.name);
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+
+        if (charInfo.assetPath && window.electronAPI) {
+          const fileData = await window.electronAPI.readFile(charInfo.assetPath);
+          if (!fileData.error) {
+            const asset = {
+              name: fileData.name,
+              path: fileData.path,
+              dataUrl: `data:${fileData.mime};base64,${fileData.data}`,
+            };
+            actions.assignCharacterAsset(charInfo.id, asset);
+          }
+        }
+
+        if (charInfo.voice) {
+          voiceConfigs[charInfo.id] = {
+            type: charInfo.voice.type,
+            refPath: charInfo.voice.refPath,
+            refText: charInfo.voice.refText,
+            presetName: charInfo.voice.presetName || ''
+          };
+        }
+      }
+
+      actions.setVoiceConfigs(voiceConfigs);
+      actions.addToast(`Preset "${preset.name}" applied successfully!`, 'success');
+    } catch (err) {
+      console.error(err);
+      actions.addToast(`Failed to apply preset: ${err.message}`, 'error');
+    }
+  }
+
+  async function handleSavePreset() {
+    if (!newPresetName.trim()) {
+      actions.addToast('Please enter a preset name', 'warning');
+      return;
+    }
+    const charPreset = {
+      name: newPresetName.trim(),
+      characters: state.characters.map(c => {
+        const config = state.voiceConfigs?.[c.id];
+        return {
+          id: c.id,
+          name: c.name,
+          colorIndex: c.colorIndex,
+          assetPath: c.asset?.path || null,
+          voice: config ? {
+            type: config.type,
+            refPath: config.refPath,
+            refText: config.refText,
+            presetName: config.presetName || ''
+          } : null
+        };
+      })
+    };
+    const res = await window.electronAPI.saveCharacterPreset(charPreset);
+    if (res.success) {
+      actions.addToast(`Preset "${charPreset.name}" saved successfully!`, 'success');
+      setNewPresetName('');
+      loadCustomPresets();
+    } else {
+      actions.addToast(`Failed to save preset: ${res.error}`, 'error');
+    }
+  }
+
+  async function handleDeletePreset(name) {
+    if (confirm(`Are you sure you want to delete preset "${name}"?`)) {
+      const res = await window.electronAPI.deleteCharacterPreset(name);
+      if (res.success) {
+        actions.addToast(`Preset "${name}" deleted`, 'success');
+        loadCustomPresets();
+      } else {
+        actions.addToast(`Failed to delete: ${res.error}`, 'error');
+      }
+    }
+  }
 }

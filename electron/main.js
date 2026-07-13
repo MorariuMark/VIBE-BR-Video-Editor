@@ -730,6 +730,7 @@ ipcMain.handle('apply-timeline-voices', async (event, payload) => {
 });
 
 const presetsFilePath = path.join(__dirname, '..', 'presets', 'voice_presets.json');
+const charPresetsFilePath = path.join(__dirname, '..', 'presets', 'character_presets.json');
 
 ipcMain.handle('save-voice-preset', async (event, preset) => {
   try {
@@ -760,6 +761,50 @@ ipcMain.handle('load-voice-presets', async () => {
   } catch (err) {
     console.error('Failed to load presets:', err);
     return [];
+  }
+});
+
+ipcMain.handle('save-character-preset', async (event, preset) => {
+  try {
+    const presetsDir = path.dirname(charPresetsFilePath);
+    if (!fs.existsSync(presetsDir)) {
+      fs.mkdirSync(presetsDir, { recursive: true });
+    }
+    let presets = [];
+    if (fs.existsSync(charPresetsFilePath)) {
+      presets = JSON.parse(fs.readFileSync(charPresetsFilePath, 'utf8'));
+    }
+    presets = presets.filter(p => p.name.toLowerCase() !== preset.name.toLowerCase());
+    presets.push(preset);
+    fs.writeFileSync(charPresetsFilePath, JSON.stringify(presets, null, 2), 'utf8');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('load-character-presets', async () => {
+  try {
+    if (fs.existsSync(charPresetsFilePath)) {
+      return JSON.parse(fs.readFileSync(charPresetsFilePath, 'utf8'));
+    }
+    return [];
+  } catch (err) {
+    console.error('Failed to load character presets:', err);
+    return [];
+  }
+});
+
+ipcMain.handle('delete-character-preset', async (event, presetName) => {
+  try {
+    if (fs.existsSync(charPresetsFilePath)) {
+      let presets = JSON.parse(fs.readFileSync(charPresetsFilePath, 'utf8'));
+      presets = presets.filter(p => p.name.toLowerCase() !== presetName.toLowerCase());
+      fs.writeFileSync(charPresetsFilePath, JSON.stringify(presets, null, 2), 'utf8');
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 });
 

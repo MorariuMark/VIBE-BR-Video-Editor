@@ -144,6 +144,109 @@ export function createExecutor(actions, getState, log) {
 
   const handlers = {
     /**
+     * LOAD_PRESET <preset_name>
+     * Loads a character preset: creating characters, assigning PNGs, setting voice configs.
+     */
+    async LOAD_PRESET(args) {
+      const presetName = args.trim();
+      if (!presetName) {
+        throw new Error('LOAD_PRESET requires a preset name. Example: LOAD_PRESET "Peter & Stewie"');
+      }
+
+      log(`📦 Loading preset "${presetName}"...`, 'info');
+
+      if (!window.electronAPI) {
+        throw new Error('Loading presets requires the Electron desktop app.');
+      }
+
+      const isDefault = presetName.toLowerCase() === 'peter & stewie' || 
+                        presetName.toLowerCase() === 'peter_stewie' || 
+                        presetName.toLowerCase() === 'default';
+
+      let presetData = null;
+
+      if (isDefault) {
+        log('   Applying default "Peter & Stewie" preset...', 'info');
+        const projectPath = await window.electronAPI.getProjectPath();
+        const projectPathNormalized = projectPath.replace(/\\/g, '/');
+
+        presetData = {
+          name: 'Peter & Stewie',
+          characters: [
+            {
+              id: 'char_stewie',
+              name: 'Stewie',
+              colorIndex: 0,
+              assetPath: `${projectPathNormalized}/assets/characters/stewie.png`,
+              voice: {
+                type: 'default',
+                refPath: `${projectPathNormalized}/assets/default_voices/stewie_ref.wav`,
+                refText: 'all this time spent keeping people from having sex and now i know how the catholic church feels buzzing',
+                presetName: 'stewie'
+              }
+            },
+            {
+              id: 'char_peter',
+              name: 'Peter',
+              colorIndex: 1,
+              assetPath: `${projectPathNormalized}/assets/characters/peter.png`,
+              voice: {
+                type: 'default',
+                refPath: `${projectPathNormalized}/assets/default_voices/peter_ref.wav`,
+                refText: "I'm gonna stare at his wife's boobs so hide that when they both go into the kitchen together it will be discussed",
+                presetName: 'peter'
+              }
+            }
+          ]
+        };
+      } else {
+        const userPresets = await window.electronAPI.loadCharacterPresets();
+        const match = userPresets.find(p => p.name.toLowerCase() === presetName.toLowerCase());
+        if (!match) {
+          throw new Error(`Preset "${presetName}" not found. Available: "Peter & Stewie"${userPresets.length > 0 ? ', ' + userPresets.map(p => `"${p.name}"`).join(', ') : ''}`);
+        }
+        presetData = match;
+      }
+
+      const voiceConfigs = { ...(getState().voiceConfigs || {}) };
+
+      for (const charInfo of presetData.characters) {
+        const currentCharacters = getState().characters;
+        const exists = currentCharacters.some(c => c.id === charInfo.id);
+        if (!exists) {
+          actions.addCharacter(charInfo.name);
+          await sleep(150);
+        }
+
+        if (charInfo.assetPath) {
+          const fileData = await window.electronAPI.readFile(charInfo.assetPath);
+          if (!fileData.error) {
+            const asset = {
+              name: fileData.name,
+              path: fileData.path,
+              dataUrl: `data:${fileData.mime};base64,${fileData.data}`,
+            };
+            actions.assignCharacterAsset(charInfo.id, asset);
+          } else {
+            log(`   ⚠️ Failed to load PNG for "${charInfo.name}": ${fileData.error}`, 'warning');
+          }
+        }
+
+        if (charInfo.voice) {
+          voiceConfigs[charInfo.id] = {
+            type: charInfo.voice.type || 'default',
+            refPath: charInfo.voice.refPath,
+            refText: charInfo.voice.refText,
+            presetName: charInfo.voice.presetName || '',
+          };
+        }
+      }
+
+      actions.setVoiceConfigs(voiceConfigs);
+      log(`✅ Preset "${presetData.name}" loaded successfully!`, 'success');
+    },
+
+    /**
      * PARSE_SCRIPT """multi-line script"""
      */
     async PARSE_SCRIPT(args) {
@@ -834,7 +937,10 @@ export const EXAMPLE_VBS = `# ════════════════�
 # Automated video production pipeline
 # ═══════════════════════════════════════════════
 
-# Step 1: Parse the dialogue script
+# Step 1: Load preset characters, assets, and voice setups
+LOAD_PRESET "Peter & Stewie"
+
+# Step 2: Parse the dialogue script
 PARSE_SCRIPT """
 **Stewie:** I can't believe you ate my cereal, Peter.
 **Peter:** Hehehehe, it was delicious Stewie.
@@ -843,20 +949,20 @@ PARSE_SCRIPT """
 **Stewie:** I will destroy you.
 """
 
-# Step 2: Load the TTS model
+# Step 3: Load the TTS model
 LOAD_MODEL qwen3tts_0.6b
 
-# Step 3: Configure character voices
+# Step 4: Configure character voices
 SET_VOICE stewie type=default
 SET_VOICE peter type=default
 
-# Step 4: Generate audio clips
+# Step 5: Generate audio clips
 GENERATE_VOICES
 
-# Step 5: Apply generated audio to timeline
+# Step 6: Apply generated audio to timeline
 APPLY_VOICES
 
-# Step 6: Set export settings and render
+# Step 7: Set export settings and render
 SET fps 30
 RENDER output="family_guy_brainrot_ep1.mp4"
 
