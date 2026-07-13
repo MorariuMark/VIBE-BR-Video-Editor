@@ -83,6 +83,24 @@ export function parseVBS(text) {
 }
 
 /**
+ * Strip surrounding single or double quotes from a string.
+ * 
+ * @param {string} str
+ * @returns {string}
+ */
+export function stripQuotes(str) {
+  if (!str) return '';
+  const trimmed = str.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.substring(1, trimmed.length - 1);
+  }
+  return trimmed;
+}
+
+/**
  * Parse key=value arguments from a command args string.
  * Supports quoted values: key="value with spaces"
  * Also extracts positional arguments (words not containing =)
@@ -108,7 +126,7 @@ function parseArgs(argsStr) {
       named[match[3].toLowerCase()] = match[4];
     } else if (match[5] !== undefined) {
       // bare positional word
-      positional.push(match[5]);
+      positional.push(stripQuotes(match[5]));
     }
   }
 
@@ -148,7 +166,7 @@ export function createExecutor(actions, getState, log) {
      * Loads a character preset: creating characters, assigning PNGs, setting voice configs.
      */
     async LOAD_PRESET(args) {
-      const presetName = args.trim();
+      const presetName = stripQuotes(args);
       if (!presetName) {
         throw new Error('LOAD_PRESET requires a preset name. Example: LOAD_PRESET "Peter & Stewie"');
       }
