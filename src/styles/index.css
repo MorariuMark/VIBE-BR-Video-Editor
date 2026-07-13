@@ -2120,54 +2120,69 @@ html, body, #root {
   padding: 20px;
 }
 
-/* ── VBS Execution Lock Overlay ── */
-.vbs-lock-overlay {
+/* ── VBS Execution Status Pill ── */
+.vbs-status-pill {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(12, 12, 12, 0.7);
-  backdrop-filter: blur(4px);
-  z-index: 90;
+  top: 76px;
+  right: 20px;
+  background: rgba(20, 20, 20, 0.9);
+  border: 1.5px solid var(--accent-primary, #1473e6);
+  border-radius: 20px;
+  padding: 6px 14px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 10px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  z-index: 95;
+  backdrop-filter: blur(10px);
   user-select: none;
+  animation: slide-in-pill 0.2s ease-out;
 }
 
-.vbs-lock-overlay__content {
-  background: var(--surface-1, #222);
-  border: 1px solid var(--border-strong, #3e3e3e);
-  border-radius: 8px;
-  padding: 24px 40px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  max-width: 400px;
-  text-align: center;
+@keyframes slide-in-pill {
+  from { transform: translateY(-20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
-.vbs-lock-overlay__pulse {
-  font-size: 32px;
-  margin-bottom: 12px;
-  animation: overlay-bounce 1s infinite alternate;
+.vbs-status-pill__indicator {
+  width: 8px;
+  height: 8px;
+  background: var(--accent-success, #00e676);
+  border-radius: 50%;
+  animation: pill-pulse 1s infinite alternate;
 }
 
-.vbs-lock-overlay__text {
-  font-size: 14px;
-  font-weight: bold;
-  color: var(--text-primary);
-  margin-bottom: 6px;
+@keyframes pill-pulse {
+  from { opacity: 0.4; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1.2); }
 }
 
-.vbs-lock-overlay__subtext {
+.vbs-status-pill__text {
   font-size: 11px;
-  color: var(--text-tertiary);
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+  font-family: var(--font-mono);
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-@keyframes overlay-bounce {
-  from { transform: translateY(0); }
-  to { transform: translateY(-8px); }
+.vbs-status-pill__stop-btn {
+  background: rgba(244, 67, 54, 0.15);
+  border: 1px solid rgba(244, 67, 54, 0.4);
+  color: #f44336;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 2px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  outline: none;
+}
+
+.vbs-status-pill__stop-btn:hover {
+  background: #f44336;
+  color: #fff;
+  border-color: #f44336;
 }

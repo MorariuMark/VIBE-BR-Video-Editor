@@ -21,6 +21,8 @@ function AppContent() {
   const [savedRightWidth, setSavedRightWidth] = useState(380);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [isVbsRunning, setIsVbsRunning] = useState(false);
+  const [vbsStep, setVbsStep] = useState('');
+  const vbsAbortRef = useRef(null);
   const resizingRef = useRef(null);
 
   // ─── Panel Resizing ───
@@ -76,9 +78,7 @@ function AppContent() {
         return;
       }
 
-      if (isVbsRunning) {
-        return; // Prevent keyboard edits/shortcuts when VBS script is running
-      }
+
 
       if (
         activeEl &&
@@ -439,15 +439,33 @@ function AppContent() {
           </div>
 
           {/* ── Automation Console ── */}
-          <AutomationConsole isOpen={consoleOpen} onToggle={() => setConsoleOpen(false)} isRunning={isVbsRunning} setIsRunning={setIsVbsRunning} />
+          <AutomationConsole
+            isOpen={consoleOpen}
+            onToggle={() => setConsoleOpen(false)}
+            isRunning={isVbsRunning}
+            setIsRunning={setIsVbsRunning}
+            currentStep={vbsStep}
+            setCurrentStep={setVbsStep}
+            abortRef={vbsAbortRef}
+          />
 
           {isVbsRunning && (
-            <div className="vbs-lock-overlay">
-              <div className="vbs-lock-overlay__content">
-                <span className="vbs-lock-overlay__pulse">⚡</span>
-                <span className="vbs-lock-overlay__text">VBS Script Executing...</span>
-                <span className="vbs-lock-overlay__subtext">Use the Stop button in the console to cancel.</span>
-              </div>
+            <div className="vbs-status-pill">
+              <span className="vbs-status-pill__indicator" />
+              <span className="vbs-status-pill__text">
+                {vbsStep || 'Executing VBS Script...'}
+              </span>
+              <button
+                className="vbs-status-pill__stop-btn"
+                onClick={() => {
+                  if (vbsAbortRef.current) {
+                    vbsAbortRef.current();
+                  }
+                }}
+                title="Stop VBS Script"
+              >
+                Stop
+              </button>
             </div>
           )}
         </div>

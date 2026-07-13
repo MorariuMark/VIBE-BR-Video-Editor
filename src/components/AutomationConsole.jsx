@@ -6,11 +6,10 @@ import { parseVBS, createExecutor, EXAMPLE_VBS } from '../engine/automationEngin
  * AutomationConsole — A collapsible bottom drawer with a VBS command editor
  * and a live execution log output area.
  */
-export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRunning }) {
+export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRunning, currentStep, setCurrentStep, abortRef }) {
   const { state, actions } = useProject();
   const [script, setScript] = useState('');
   const [logs, setLogs] = useState([]);
-  const [currentStep, setCurrentStep] = useState('');
   const executorRef = useRef(null);
   const logEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -38,7 +37,7 @@ export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRu
     if (type === 'system' && message.startsWith('[')) {
       setCurrentStep(message);
     }
-  }, []);
+  }, [setCurrentStep]);
 
   const getStateSnapshot = useCallback(() => stateRef.current, []);
 
@@ -67,6 +66,9 @@ export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRu
 
     const executor = createExecutor(actions, getStateSnapshot, addLog);
     executorRef.current = executor;
+    if (abortRef) {
+      abortRef.current = () => executor.abort();
+    }
 
     try {
       const result = await executor.execute(commands);
@@ -84,8 +86,11 @@ export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRu
       setIsRunning(false);
       setCurrentStep('');
       executorRef.current = null;
+      if (abortRef) {
+        abortRef.current = null;
+      }
     }
-  }, [script, actions, getStateSnapshot, addLog]);
+  }, [script, actions, getStateSnapshot, addLog, setIsRunning, setCurrentStep, abortRef]);
 
   const handleStop = useCallback(() => {
     if (executorRef.current) {
@@ -96,7 +101,7 @@ export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRu
   const handleClear = useCallback(() => {
     setLogs([]);
     setCurrentStep('');
-  }, []);
+  }, [setCurrentStep]);
 
   const handleLoadExample = useCallback(() => {
     setScript(EXAMPLE_VBS);
