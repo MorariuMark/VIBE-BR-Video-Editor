@@ -148,10 +148,15 @@ function parseArgs(argsStr) {
 export function createExecutor(actions, getState, log) {
   let aborted = false;
   let generatedVoiceResult = null; // Stores generated voice data between GENERATE_VOICES and APPLY_VOICES
+  let activeFetchController = null;
 
   const abort = () => {
     aborted = true;
     log('⛔ Execution aborted by user.', 'error');
+    if (activeFetchController) {
+      log('🛑 Cancelling active network request...', 'warning');
+      activeFetchController.abort();
+    }
   };
 
   const checkAbort = () => {
@@ -442,10 +447,6 @@ export function createExecutor(actions, getState, log) {
       }
     },
 
-    /**
-     * GENERATE_VOICES
-     * Generates TTS audio for all dialogue blocks using configured voices.
-     */
     async GENERATE_VOICES() {
       const state = getState();
 
@@ -469,9 +470,12 @@ export function createExecutor(actions, getState, log) {
       // Verify TTS server is online with a model loaded
       let statusData;
       try {
-        const statusRes = await fetch(`${TTS_SERVER}/status`);
+        activeFetchController = new AbortController();
+        const statusRes = await fetch(`${TTS_SERVER}/status`, { signal: activeFetchController.signal });
         statusData = await statusRes.json();
+        activeFetchController = null;
       } catch (err) {
+        activeFetchController = null;
         throw new Error(`TTS server is not running at ${TTS_SERVER}. Start the Python voice server first.`);
       }
 
@@ -515,13 +519,22 @@ export function createExecutor(actions, getState, log) {
           bodyPayload.speed = 1.0;
         }
 
-        const response = await fetch(`${TTS_SERVER}/clone`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(bodyPayload),
-        });
+        let data;
+        try {
+          activeFetchController = new AbortController();
+          const response = await fetch(`${TTS_SERVER}/clone`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(bodyPayload),
+            signal: activeFetchController.signal,
+          });
+          data = await response.json();
+          activeFetchController = null;
+        } catch (err) {
+          activeFetchController = null;
+          throw err;
+        }
 
-        const data = await response.json();
         if (!data.success) {
           throw new Error(`Failed generating clip ${i + 1} (${block.characterName}): ${data.error}`);
         }
@@ -530,12 +543,51 @@ export function createExecutor(actions, getState, log) {
         updatedBlocks[i].duration = data.duration;
         updatedBlocks[i].words = data.words || [];
 
-        log(`   ✓ Generated ${data.duration.toFixed(2)}s clip → ${savePath.split('/').pop()}`, 'success');
+        log(`   ✓ Generated ${data.duration.toFixed(2)}s clip. Applying to timeline...`, 'success');
+
+        // Apply this single voice clip immediately
+        if (window.electronAPI?.applyTimelineVoices) {
+          const singleVoice = {
+            audioPath: data.wav_path,
+            characterName: block.characterName,
+            blockId: block.id,
+            characterId: block.characterId,
+            duration: data.duration,
+            index: i,
+            words: data.words || [],
+          };
+
+          const syncRes = await window.electronAPI.applyTimelineVoices({
+            voices: [singleVoice],
+            voiceConfigs: state.voiceConfigs,
+            isRedo: false,
+          });
+
+          if (syncRes.success) {
+            // Wait for media item to be processed and state updated
+            await sleep(400);
+
+            const currentState = getState();
+            const mediaItem = currentState.mediaItems.find(m => m.blockId === block.id);
+            if (mediaItem) {
+              const applyItem = {
+                blockId: block.id,
+                duration: data.duration,
+                words: data.words || [],
+                name: mediaItem.name,
+                path: mediaItem.path,
+                dataUrl: mediaItem.dataUrl,
+              };
+              actions.applyVoices([applyItem]);
+              await sleep(150);
+            }
+          }
+        }
       }
 
-      // Store results for APPLY_VOICES
+      // Store results just in case
       generatedVoiceResult = { dialogueBlocks: updatedBlocks };
-      log(`✅ All ${state.dialogueBlocks.length} voice clips generated successfully!`, 'success');
+      log(`✅ All ${state.dialogueBlocks.length} voice clips generated and applied to timeline!`, 'success');
     },
 
     /**
@@ -543,13 +595,21 @@ export function createExecutor(actions, getState, log) {
      * Applies the most recently generated voice clips to the timeline.
      */
     async APPLY_VOICES() {
+      const state = getState();
+      const hasAudioClips = state.tracks.some(track => 
+        track.type === 'audio' && track.clips.some(c => c.blockId)
+      );
+
+      if (hasAudioClips) {
+        log('✓ Voice clips already applied on-the-fly.', 'success');
+        return;
+      }
+
       if (!generatedVoiceResult || !generatedVoiceResult.dialogueBlocks) {
         throw new Error('No generated voices to apply. Run GENERATE_VOICES first.');
       }
 
       log('📎 Applying voice clips to timeline...', 'info');
-
-      const state = getState();
       const updatedBlocks = generatedVoiceResult.dialogueBlocks;
 
       // Build voice items for the IPC call (same format as VoiceCloneWindow)
