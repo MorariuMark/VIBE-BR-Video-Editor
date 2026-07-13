@@ -251,13 +251,25 @@ export function createExecutor(actions, getState, log) {
       const voiceType = named.type || 'default';
       const state = getState();
 
-      // Find the character by partial name match
-      const char = state.characters.find(c => 
-        c.name.toLowerCase().includes(charName) || charName.includes(c.name.toLowerCase())
-      );
+      const charNameLower = charName.trim().toLowerCase();
+      // 1. Try exact match
+      let char = state.characters.find(c => c.name.toLowerCase() === charNameLower);
+      
+      // 2. Try partial includes match
+      if (!char) {
+        char = state.characters.find(c => 
+          c.name.toLowerCase().includes(charNameLower) || charNameLower.includes(c.name.toLowerCase())
+        );
+      }
+      
+      // 3. Try character ID match
+      if (!char) {
+        char = state.characters.find(c => c.id.toLowerCase().includes(charNameLower));
+      }
 
       if (!char) {
-        throw new Error(`Character "${charName}" not found. Available: ${state.characters.map(c => c.name).join(', ')}`);
+        const availableChars = state.characters.map(c => `"${c.name}"`).join(', ');
+        throw new Error(`Character "${charName}" not found. Available characters in timeline: ${availableChars || 'None'}`);
       }
 
       if (voiceType === 'default') {
@@ -780,6 +792,13 @@ export function createExecutor(actions, getState, log) {
       try {
         await handler(cmd.args);
       } catch (err) {
+        log(`🔄 Error/Abort encountered. Automatically unloading model from GPU memory to free VRAM...`, 'warning');
+        try {
+          await handlers.UNLOAD_MODEL();
+        } catch (unloadErr) {
+          log(`⚠️ Unload fallback failed: ${unloadErr.message}`, 'warning');
+        }
+
         if (err.message === 'ABORTED') {
           log('⛔ Execution aborted.', 'error');
           return { success: false, aborted: true };

@@ -2119,3 +2119,55 @@ html, body, #root {
   text-align: center;
   padding: 20px;
 }
+
+/* ── VBS Execution Lock Overlay ── */
+.vbs-lock-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(12, 12, 12, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+.vbs-lock-overlay__content {
+  background: var(--surface-1, #222);
+  border: 1px solid var(--border-strong, #3e3e3e);
+  border-radius: 8px;
+  padding: 24px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  max-width: 400px;
+  text-align: center;
+}
+
+.vbs-lock-overlay__pulse {
+  font-size: 32px;
+  margin-bottom: 12px;
+  animation: overlay-bounce 1s infinite alternate;
+}
+
+.vbs-lock-overlay__text {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.vbs-lock-overlay__subtext {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+@keyframes overlay-bounce {
+  from { transform: translateY(0); }
+  to { transform: translateY(-8px); }
+}

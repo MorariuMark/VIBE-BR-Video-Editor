@@ -6,17 +6,22 @@ import { parseVBS, createExecutor, EXAMPLE_VBS } from '../engine/automationEngin
  * AutomationConsole — A collapsible bottom drawer with a VBS command editor
  * and a live execution log output area.
  */
-export default function AutomationConsole({ isOpen, onToggle }) {
+export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRunning }) {
   const { state, actions } = useProject();
   const [script, setScript] = useState('');
   const [logs, setLogs] = useState([]);
-  const [isRunning, setIsRunning] = useState(false);
   const [currentStep, setCurrentStep] = useState('');
   const executorRef = useRef(null);
   const logEndRef = useRef(null);
   const textareaRef = useRef(null);
   const [consoleHeight, setConsoleHeight] = useState(240);
   const resizingRef = useRef(false);
+
+  // Keep a ref of the latest state to avoid stale closures in the async VBS executor
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // Auto-scroll log to bottom
   useEffect(() => {
@@ -35,7 +40,7 @@ export default function AutomationConsole({ isOpen, onToggle }) {
     }
   }, []);
 
-  const getStateSnapshot = useCallback(() => state, [state]);
+  const getStateSnapshot = useCallback(() => stateRef.current, []);
 
   const handleRun = useCallback(async () => {
     if (!script.trim()) {

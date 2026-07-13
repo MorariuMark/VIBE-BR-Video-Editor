@@ -20,6 +20,7 @@ function AppContent() {
   const [savedLeftWidth, setSavedLeftWidth] = useState(280);
   const [savedRightWidth, setSavedRightWidth] = useState(380);
   const [consoleOpen, setConsoleOpen] = useState(false);
+  const [isVbsRunning, setIsVbsRunning] = useState(false);
   const resizingRef = useRef(null);
 
   // ─── Panel Resizing ───
@@ -73,6 +74,10 @@ function AppContent() {
         e.preventDefault();
         setConsoleOpen(prev => !prev);
         return;
+      }
+
+      if (isVbsRunning) {
+        return; // Prevent keyboard edits/shortcuts when VBS script is running
       }
 
       if (
@@ -141,7 +146,7 @@ function AppContent() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [actions, state.isPlaying, state.selectedClipId, state.tracks, state.currentTime, setConsoleOpen]);
+  }, [actions, state.isPlaying, state.selectedClipId, state.tracks, state.currentTime, setConsoleOpen, isVbsRunning]);
 
   useEffect(() => {
     if (window.electronAPI && window.electronAPI.onTimelineVoicesUpdated) {
@@ -295,7 +300,7 @@ function AppContent() {
       <div className="app-layout">
         <Toolbar onToggleConsole={() => setConsoleOpen(prev => !prev)} isConsoleOpen={consoleOpen} />
 
-        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, position: 'relative' }}>
           {/* ── Upper Area: Library | Preview | Script ── */}
           <div className="workspace" style={{ flex: 1, minHeight: 0 }}>
             {/* Left Panel - Media Library */}
@@ -434,7 +439,17 @@ function AppContent() {
           </div>
 
           {/* ── Automation Console ── */}
-          <AutomationConsole isOpen={consoleOpen} onToggle={() => setConsoleOpen(false)} />
+          <AutomationConsole isOpen={consoleOpen} onToggle={() => setConsoleOpen(false)} isRunning={isVbsRunning} setIsRunning={setIsVbsRunning} />
+
+          {isVbsRunning && (
+            <div className="vbs-lock-overlay">
+              <div className="vbs-lock-overlay__content">
+                <span className="vbs-lock-overlay__pulse">⚡</span>
+                <span className="vbs-lock-overlay__text">VBS Script Executing...</span>
+                <span className="vbs-lock-overlay__subtext">Use the Stop button in the console to cancel.</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
