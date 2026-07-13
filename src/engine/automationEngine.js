@@ -1028,7 +1028,7 @@ PARSE_SCRIPT """
 """
 
 # Step 3: Load the TTS model
-LOAD_MODEL qwen3tts_0.6b
+LOAD_MODEL luxtts
 
 # Step 4: Configure character voices
 SET_VOICE stewie type=default

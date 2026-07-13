@@ -2095,12 +2095,16 @@ html, body, #root {
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.6;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .automation-console__log-entry {
   margin-bottom: 4px;
   white-space: pre-wrap;
   word-break: break-all;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .automation-console__log-time {
