@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveVoicePreset: (preset) => ipcRenderer.invoke('save-voice-preset', preset),
   loadVoicePresets: () => ipcRenderer.invoke('load-voice-presets'),
   getProjectPath: () => ipcRenderer.invoke('get-project-path'),
+  getDownloadsPath: () => ipcRenderer.invoke('get-downloads-path'),
   listDefaultVoices: () => ipcRenderer.invoke('list-default-voices'),
   copyFile: (src, dest) => ipcRenderer.invoke('copy-file', { src, dest }),
   mixAudioClips: (config) => ipcRenderer.invoke('mix-audio-clips', config),

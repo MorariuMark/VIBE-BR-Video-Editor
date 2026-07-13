@@ -8,6 +8,7 @@ import ScriptEditor from './components/ScriptEditor';
 import Timeline from './components/Timeline';
 import ExportModal from './components/ExportModal';
 import ToastContainer from './components/ToastContainer';
+import AutomationConsole from './components/AutomationConsole';
 
 function AppContent() {
   const { state, actions } = useProject();
@@ -18,6 +19,7 @@ function AppContent() {
   const [rightMinimized, setRightMinimized] = useState(false);
   const [savedLeftWidth, setSavedLeftWidth] = useState(280);
   const [savedRightWidth, setSavedRightWidth] = useState(380);
+  const [consoleOpen, setConsoleOpen] = useState(false);
   const resizingRef = useRef(null);
 
   // ─── Panel Resizing ───
@@ -65,6 +67,14 @@ function AppContent() {
   useEffect(() => {
     const handleKeyDown = (e) => {
       const activeEl = document.activeElement;
+
+      // Toggle console with Ctrl+` shortcut (works even inside inputs/textareas)
+      if (e.ctrlKey && e.key === '`') {
+        e.preventDefault();
+        setConsoleOpen(prev => !prev);
+        return;
+      }
+
       if (
         activeEl &&
         (activeEl.tagName === 'INPUT' ||
@@ -131,7 +141,7 @@ function AppContent() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [actions, state.isPlaying, state.selectedClipId, state.tracks, state.currentTime]);
+  }, [actions, state.isPlaying, state.selectedClipId, state.tracks, state.currentTime, setConsoleOpen]);
 
   useEffect(() => {
     if (window.electronAPI && window.electronAPI.onTimelineVoicesUpdated) {
@@ -283,7 +293,7 @@ function AppContent() {
       <TitleBar />
       
       <div className="app-layout">
-        <Toolbar />
+        <Toolbar onToggleConsole={() => setConsoleOpen(prev => !prev)} isConsoleOpen={consoleOpen} />
 
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           {/* ── Upper Area: Library | Preview | Script ── */}
@@ -422,6 +432,9 @@ function AppContent() {
           <div style={{ height: timelineHeight, flexShrink: 0 }}>
             <Timeline />
           </div>
+
+          {/* ── Automation Console ── */}
+          <AutomationConsole isOpen={consoleOpen} onToggle={() => setConsoleOpen(false)} />
         </div>
       </div>
 

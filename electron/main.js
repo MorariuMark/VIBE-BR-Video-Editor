@@ -767,6 +767,11 @@ ipcMain.handle('get-project-path', () => {
   return path.join(__dirname, '..');
 });
 
+ipcMain.handle('get-downloads-path', () => {
+  const { app } = require('electron');
+  return app.getPath('downloads');
+});
+
 ipcMain.handle('list-default-voices', async () => {
   try {
     const voicesDir = path.join(__dirname, '..', 'assets', 'default_voices');
