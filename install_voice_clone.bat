@@ -43,7 +43,16 @@ echo [4/4] Installing qwen-tts, flask, soundfile, and dependencies...
 pip install -U qwen-tts
 pip install flask soundfile numpy requests
 if errorlevel 1 (
-    echo [ERROR] Failed to install dependencies.
+    echo [ERROR] Failed to install Qwen-TTS/Flask dependencies.
+    pause
+    exit /b 1
+)
+
+:: 6. Install LuxTTS dependencies
+echo Installing LuxTTS model dependencies...
+pip install -r LuxTTS/requirements.txt
+if errorlevel 1 (
+    echo [ERROR] Failed to install LuxTTS dependencies.
     pause
     exit /b 1
 )

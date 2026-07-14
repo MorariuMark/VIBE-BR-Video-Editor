@@ -281,13 +281,13 @@ export function recalculateTimings(blocks, changedIndex, oldBlock) {
   return updatedBlocks;
 }
 
-/**
- * Add a custom keyword / character to the system.
- */
-export function addCustomCharacter(existingCharacters, name) {
+export function addCustomCharacter(existingCharacters, nameOrObj) {
   const colorIndex = existingCharacters.length;
+  const isObj = nameOrObj && typeof nameOrObj === 'object';
+  const name = isObj ? nameOrObj.name : nameOrObj;
+  const id = isObj && nameOrObj.id ? nameOrObj.id : `char_${name.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
   return {
-    id: `char_${name.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`,
+    id: id,
     name: name,
     color: TRACK_COLORS[colorIndex % TRACK_COLORS.length],
     asset: null,

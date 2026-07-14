@@ -2324,7 +2324,7 @@ export default function ScriptEditor({ onMinimize }) {
         const currentCharacters = state.characters;
         const exists = currentCharacters.some(c => c.id === charInfo.id);
         if (!exists) {
-          actions.addCharacter(charInfo.name);
+          actions.addCharacter({ name: charInfo.name, id: charInfo.id });
           await new Promise(resolve => setTimeout(resolve, 150));
         }
 

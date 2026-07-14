@@ -237,7 +237,7 @@ export function createExecutor(actions, getState, log) {
         const currentCharacters = getState().characters;
         const exists = currentCharacters.some(c => c.id === charInfo.id);
         if (!exists) {
-          actions.addCharacter(charInfo.name);
+          actions.addCharacter({ name: charInfo.name, id: charInfo.id });
           await sleep(150);
         }
 
@@ -421,9 +421,11 @@ export function createExecutor(actions, getState, log) {
           refPath: match.path,
           refText: match.transcript,
           presetName: match.name,
+          speed: named.speed ? parseFloat(named.speed) : 1.0,
+          temperature: named.temperature ? parseFloat(named.temperature) : 0.5,
         };
         actions.setVoiceConfigs(configs);
-        log(`✅ Voice set for "${char.name}" → default voice "${match.name}"`, 'success');
+        log(`✅ Voice set for "${char.name}" → default voice "${match.name}" (speed=${configs[char.id].speed}, temp=${configs[char.id].temperature})`, 'success');
 
       } else if (voiceType === 'custom') {
         const refPath = named.ref;
@@ -439,9 +441,11 @@ export function createExecutor(actions, getState, log) {
           refPath,
           refText,
           presetName: '',
+          speed: named.speed ? parseFloat(named.speed) : 1.0,
+          temperature: named.temperature ? parseFloat(named.temperature) : 0.5,
         };
         actions.setVoiceConfigs(configs);
-        log(`✅ Voice set for "${char.name}" → custom ref "${refPath}"`, 'success');
+        log(`✅ Voice set for "${char.name}" → custom ref "${refPath}" (speed=${configs[char.id].speed}, temp=${configs[char.id].temperature})`, 'success');
       } else {
         throw new Error(`Unknown voice type "${voiceType}". Use "default" or "custom".`);
       }
@@ -512,10 +516,12 @@ export function createExecutor(actions, getState, log) {
           ref_audio: config.refPath,
           ref_text: config.refText,
           save_path: savePath,
-          temperature: isQwen ? 0.0 : 0.5,
+          temperature: config.temperature !== undefined ? config.temperature : (isQwen ? 0.0 : 0.5),
         };
 
-        if (!isQwen) {
+        if (config.speed !== undefined) {
+          bodyPayload.speed = config.speed;
+        } else if (!isQwen) {
           bodyPayload.speed = 1.0;
         }
 
@@ -942,6 +948,116 @@ export function createExecutor(actions, getState, log) {
           throw new Error(`Unknown property "${prop}". Valid: resolution, fps, name`);
       }
     },
+
+    /**
+     * SET_STYLE <character_name> [color=#ff0000] [font="Impact"] [size=48] [stroke_color=#000000] [stroke_width=4] [bg_color="rgba(0,0,0,0.7)"] [bg_padding=10] [show_bg=true|false] [case_mode=uppercase|lowercase|none] [enable_highlight=true|false] [highlight_color=#ffd21e]
+     * Sets character text styling parameters for captions.
+     */
+    async SET_STYLE(args) {
+      const { positional, named } = parseArgs(args);
+      const charName = stripQuotes(positional[0])?.toLowerCase();
+      if (!charName) {
+        throw new Error('SET_STYLE requires character name. Example: SET_STYLE stewie color="#ffd21e"');
+      }
+
+      const state = getState();
+      // Find character
+      const charNameLower = charName.trim().toLowerCase();
+      let char = state.characters.find(c => c.name.toLowerCase() === charNameLower);
+      if (!char) {
+        char = state.characters.find(c => 
+          c.name.toLowerCase().includes(charNameLower) || charNameLower.includes(c.name.toLowerCase())
+        );
+      }
+      if (!char) {
+        throw new Error(`Character "${charName}" not found for setting style.`);
+      }
+
+      const { DEFAULT_TEXT_STYLE } = await import('./scriptParser.js');
+      const currentStyle = char.textStyle || { ...DEFAULT_TEXT_STYLE };
+      const updatedStyle = { ...currentStyle };
+
+      if (named.color) updatedStyle.color = stripQuotes(named.color);
+      if (named.font || named.font_family) updatedStyle.fontFamily = stripQuotes(named.font || named.font_family);
+      if (named.size || named.font_size) updatedStyle.fontSize = parseInt(stripQuotes(named.size || named.font_size), 10);
+      if (named.stroke_color) updatedStyle.strokeColor = stripQuotes(named.stroke_color);
+      if (named.stroke_width) updatedStyle.strokeWidth = parseInt(stripQuotes(named.stroke_width), 10);
+      if (named.bg_color) updatedStyle.backgroundColor = stripQuotes(named.bg_color);
+      if (named.bg_padding) updatedStyle.backgroundPadding = parseInt(stripQuotes(named.bg_padding), 10);
+      
+      if (named.show_bg !== undefined) {
+        const val = stripQuotes(named.show_bg).toLowerCase();
+        updatedStyle.showBackground = (val === 'true' || val === '1');
+      }
+      if (named.case_mode) updatedStyle.caseMode = stripQuotes(named.case_mode);
+      if (named.enable_highlight !== undefined) {
+        const val = stripQuotes(named.enable_highlight).toLowerCase();
+        updatedStyle.enableHighlight = (val === 'true' || val === '1');
+      }
+      if (named.highlight_color) updatedStyle.highlightColor = stripQuotes(named.highlight_color);
+
+      // Dispatch style update to character
+      actions.updateCharacter(char.id, { textStyle: updatedStyle });
+      log(`✅ Style updated for "${char.name}": font=${updatedStyle.fontFamily}, size=${updatedStyle.fontSize}px, color=${updatedStyle.color}`, 'success');
+    },
+
+    /**
+     * SET_ANIMATION <character_name> [entrance=slide-up] [exit=slide-down] [sustain=bounce] [entrance_dur=0.3] [exit_dur=0.3] [sustain_intensity=0.5] [sustain_speed=0.5]
+     * Configures the entrance, sustain, and exit animations for all dialogue blocks of a character.
+     */
+    async SET_ANIMATION(args) {
+      const { positional, named } = parseArgs(args);
+      const charName = stripQuotes(positional[0])?.toLowerCase();
+      if (!charName) {
+        throw new Error('SET_ANIMATION requires character name: SET_ANIMATION <character> [entrance=slide-up] ...');
+      }
+      
+      const state = getState();
+      // Find character
+      const charNameLower = charName.trim().toLowerCase();
+      let char = state.characters.find(c => c.name.toLowerCase() === charNameLower);
+      if (!char) {
+        char = state.characters.find(c => 
+          c.name.toLowerCase().includes(charNameLower) || charNameLower.includes(c.name.toLowerCase())
+        );
+      }
+      if (!char) {
+        throw new Error(`Character "${charName}" not found for setting animation.`);
+      }
+
+      // Read named arguments, fallback to existing animation settings or defaults
+      const currentBlock = state.dialogueBlocks.find(b => b.characterId === char.id);
+      const currentAnim = currentBlock?.animation || {
+        entrance: 'slide-up',
+        exit: 'slide-down',
+        entranceDuration: 0.3,
+        exitDuration: 0.3,
+        sustain: 'none',
+        sustainIntensity: 0.5,
+        sustainSpeed: 0.5,
+      };
+
+      const entrance = named.entrance || currentAnim.entrance;
+      const exit = named.exit || currentAnim.exit;
+      const sustain = named.sustain || currentAnim.sustain;
+      const entranceDuration = parseFloat(named.entrance_dur || named.entrance_duration || currentAnim.entranceDuration || 0.3);
+      const exitDuration = parseFloat(named.exit_dur || named.exit_duration || currentAnim.exitDuration || 0.3);
+      const sustainIntensity = parseFloat(named.sustain_intensity || currentAnim.sustainIntensity || 0.5);
+      const sustainSpeed = parseFloat(named.sustain_speed || currentAnim.sustainSpeed || 0.5);
+
+      const animPayload = {
+        entrance,
+        exit,
+        sustain,
+        entranceDuration,
+        exitDuration,
+        sustainIntensity,
+        sustainSpeed,
+      };
+
+      actions.batchUpdateAnimation(char.id, animPayload);
+      log(`✅ Animation updated for "${char.name}": entrance=${entrance}, exit=${exit}, sustain=${sustain}`, 'success');
+    },
   };
 
   // ─── Main Executor ───
@@ -1020,30 +1136,139 @@ LOAD_PRESET "Peter & Stewie"
 
 # Step 2: Parse the dialogue script
 PARSE_SCRIPT """
-**Stewie:** I can't believe you ate my cereal, Peter.
-**Peter:** Hehehehe, it was delicious Stewie.
-**Stewie:** You absolute buffoon. That was imported from Switzerland.
-**Peter:** Switzerland? I thought it was from Stop and Shop.
-**Stewie:** I will destroy you.
+**Stewie:** Look, Peter, building a video editor inside Electron is easy if you don't choke the UI thread. You just overlay a fast canvas for the free-transform handles and offload the heavy rendering to a local FFmpeg binary.
+
+**Peter:** Yeah, well, what about the script parsing, smart guy? If I edit a paragraph or change a keyword, the whole timeline array has to recalculate its positions and shift every character animation block.
+
+**Stewie:** It's basic reactive state tracking, you absolute buffoon! When a block's duration changes, you just apply a delta offset to the timestamps of every block that follows it on the timeline. It's junior-year data structures!
+
+**Peter:** Oh yeah? Well I bet you can't even make the characters slide in and out smoothly. Every time I try, they just pop in like a broken PowerPoint.
+
+**Stewie:** That's because you're not using proper easing functions, you philistine! A simple cubic bezier with an overshoot parameter gives you that bouncy entrance that the kids love. And for the exit, a quick ease-in-cubic fades them out before they slide off.
+
+**Peter:** Hehehe... bouncy. Like that time I bounced on that trampoline at Chris's birthday party.
 """
 
 # Step 3: Load the TTS model
-LOAD_MODEL qwen3tts_0.6b
+LOAD_MODEL luxtts
 
-# Step 4: Configure character voices
-SET_VOICE stewie type=default
-SET_VOICE peter type=default
+# Step 4: Configure character voices (including custom speed and temp parameters)
+SET_VOICE stewie type=default speed=1.05 temperature=0.3
+SET_VOICE peter type=default speed=0.95 temperature=0.5
 
-# Step 5: Generate audio clips
+# Step 5: Customize character styling (fonts, sizes, colors, highlighting)
+SET_STYLE stewie color="#00e5ff" font="Impact" size=52 stroke_color="#000000" stroke_width=4
+SET_STYLE peter color="#ffab40" font="Arial" size=48 stroke_color="#000000" stroke_width=3
+
+# Step 6: Customize character animations (entrance, sustain, exit types & durations)
+SET_ANIMATION stewie entrance="pop" exit="slide-down" sustain="float" entrance_dur=0.4 exit_dur=0.4
+SET_ANIMATION peter entrance="slide-left" exit="slide-right" sustain="bounce" entrance_dur=0.3 exit_dur=0.3 sustain_intensity=0.7
+
+# Step 7: Generate and apply audio clips
 GENERATE_VOICES
 
-# Step 6: Apply generated audio to timeline
+# Step 8: Apply generated audio to timeline
 APPLY_VOICES
 
-# Step 7: Set export settings and render
+# Step 9: Set export settings and render
 SET fps 30
 RENDER output="family_guy_brainrot_ep1.mp4"
 
-# Step 7: Clean up GPU memory
+# Step 10: Clean up GPU memory
 UNLOAD_MODEL
+
+# ══════════════════════════════════════════════════════════════════════════════
+#              VBS (VIBE BUILD SCRIPT) LANGUAGE SPECIFICATION & REFERENCE
+# ══════════════════════════════════════════════════════════════════════════════
+# This specification serves as a reference manual for AI models and automation
+# engines to automatically compose valid build scripts.
+#
+# GENERAL SYNTAX RULES:
+# 1. Comments start with the '#' character and are ignored.
+# 2. Commands are case-sensitive and must be written in UPPERCASE.
+# 3. Parameters are key=value tokens. Quote values containing spaces (e.g. font="Impact").
+# 4. Multi-line block parameters use triple-quotes (""").
+#
+# COMMAND REFERENCE:
+#
+# 1. LOAD_PRESET "[preset_name]"
+#    Loads character assets, names, positions, and voice reference settings.
+#    - Built-in default preset: "Peter & Stewie"
+#    - Custom user-created presets can also be loaded by their exact saved name.
+#    - Usage: LOAD_PRESET "Peter & Stewie"
+#
+# 2. PARSE_SCRIPT """[multi-line script]"""
+#    Parses raw dialog script into dialogue blocks on the timeline.
+#    - Format: **[Character Name]:** [Dialogue Text]
+#    - Lines without character headers are parsed or ignored.
+#    - Usage:
+#      PARSE_SCRIPT """
+#      **Stewie:** Look at me, I'm scripting!
+#      **Peter:** Hehehe, nice one Stewie.
+#      """
+#
+# 3. LOAD_MODEL [model_name]
+#    Loads TTS model weights into GPU VRAM.
+#    - Available models:
+#      - luxtts (LuxTTS 1.7B - ultra-fast lightweight voice cloner)
+#      - qwen3tts_0.6b (Qwen3-TTS 0.6B - high-quality voice cloner)
+#      - qwen3tts_1.7b (Qwen3-TTS 1.7B - premium quality model)
+#    - Usage: LOAD_MODEL luxtts
+#
+# 4. SET_VOICE [character_name] type=default|custom [speed=1.0] [temperature=0.5] [ref="path"] [text="transcript"]
+#    Binds a TTS voice profile to a parsed character name.
+#    - type="default": Resolves automatically from default voices (stewie, peter).
+#    - type="custom": Requires ref (local WAV path) and text (matching transcript).
+#    - speed: Synthesized audio tempo multiplier (default: 1.0).
+#    - temperature: Voice variance / randomness (default: 0.5).
+#    - Usage: SET_VOICE stewie type=default speed=1.05 temperature=0.3
+#
+# 5. SET_STYLE [character_name] [color=#HEX] [font="Family"] [size=px] [stroke_color=#HEX] [stroke_width=px] [show_bg=true|false] [bg_color="rgba(...)"] [bg_padding=px] [case_mode=uppercase|lowercase|none] [enable_highlight=true|false] [highlight_color=#HEX]
+#    Customizes text caption styling parameters for a specific character.
+#    - color: Primary font color hex code.
+#    - font: System or custom font family name (e.g. "Impact", "Arial").
+#    - size: Font size in pixels.
+#    - stroke_color & stroke_width: Text outline styling parameters.
+#    - show_bg: Enables background text backdrops.
+#    - enable_highlight & highlight_color: Configures active spoken word highlighting.
+#    - Usage: SET_STYLE stewie color="#00e5ff" font="Impact" size=52
+#
+# 6. SET_ANIMATION [character_name] [entrance=preset] [exit=preset] [sustain=preset] [entrance_dur=sec] [exit_dur=sec] [sustain_intensity=val] [sustain_speed=val]
+#    Applies transition and motion animations to character images.
+#    - Available entrances/exits: slide-up, slide-down, slide-left, slide-right, pop, fade, zoom-spin, bounce, flip, slide-rotate
+#    - Available sustains: bounce, shake, float, none
+#    - entrance_dur & exit_dur: Transition animation length in seconds.
+#    - Usage: SET_ANIMATION stewie entrance="pop" exit="slide-down" sustain="float" entrance_dur=0.4 exit_dur=0.4
+#
+# 7. GENERATE_VOICES
+#    Triggers the active TTS model to synthesize WAV files for all dialogue blocks.
+#    - Voice clips are generated and automatically applied to the timeline in real-time.
+#    - Usage: GENERATE_VOICES
+#
+# 8. APPLY_VOICES
+#    Safe no-op backup command. Automatically resolved during GENERATE_VOICES.
+#    - Usage: APPLY_VOICES
+#
+# 9. SET [property] [value]
+#    Configures project properties.
+#    - Supported properties:
+#      - fps: Frame rate of the final output (e.g. 30, 60).
+#      - resolution: Video dimensions in WIDTHxHEIGHT format (e.g. 1080x1920).
+#      - name: The internal automation project name.
+#    - Usage: SET fps 30
+#
+# 10. RENDER [output="filename.mp4"]
+#     Triggers the rendering engine. Composes and exports the video to the output file.
+#     - output: Relative or absolute destination filename. Recommends saving to the downloads path.
+#     - Usage: RENDER output="output.mp4"
+#
+# 11. UNLOAD_MODEL
+#     Unloads the active TTS weights from GPU memory (VRAM). Always include this
+#     at the end of your script to free resources.
+#     - Usage: UNLOAD_MODEL
+#
+# 12. WAIT [seconds]
+#     Pauses script execution for the specified time.
+#     - Usage: WAIT 5
+# ══════════════════════════════════════════════════════════════════════════════
 `;
