@@ -340,7 +340,6 @@ def load_model():
             
         return jsonify({"success": True, "message": f"Model {requested_type} loaded successfully"})
     except Exception as e:
-        import traceback
         traceback.print_exc()
         print(f"[Python Server] Failed to load model: {str(e)}", flush=True)
         return jsonify({"success": False, "error": str(e)}), 500
@@ -429,7 +428,6 @@ def clone_voice():
             audio_data = wavs[0]
             if hasattr(audio_data, "cpu"):
                 audio_data = audio_data.cpu().numpy()
-            import numpy as np
             audio_data = np.squeeze(audio_data)
         else: # luxtts
             # Encode reference prompt
@@ -488,7 +486,6 @@ def clone_voice():
                         })
                 print(f"[Python Server] Transcribed {len(words)} word timestamps.", flush=True)
         except Exception as trans_err:
-            import traceback
             traceback.print_exc()
             print(f"[Python Server] Failed to transcribe word timestamps: {str(trans_err)}", flush=True)
 
@@ -500,7 +497,6 @@ def clone_voice():
         })
         
     except Exception as e:
-        import traceback
         traceback.print_exc()
         print(f"[Python Server] Voice clone failed: {str(e)}", flush=True)
         return jsonify({"success": False, "error": str(e)}), 500

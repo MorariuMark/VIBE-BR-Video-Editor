@@ -6,6 +6,9 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   root: '.',
+  esbuild: {
+    drop: ['console', 'debugger'],
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

@@ -678,6 +678,58 @@ export function createExecutor(actions, getState, log) {
     },
 
     /**
+     * APPLY_RANDOM_BACKGROUND
+     * Selects a random background video from the preset library or project media library,
+     * and sets it as the active background. If no background video is available, removes the background.
+     */
+    async APPLY_RANDOM_BACKGROUND() {
+      log('🎬 Choosing a random background video...', 'info');
+      const state = getState();
+      const projectVideos = state.mediaItems.filter(m => m.type === 'video');
+      let presetVideos = [];
+      if (window.electronAPI && window.electronAPI.loadMediaPresets) {
+        try {
+          const presets = await window.electronAPI.loadMediaPresets();
+          presetVideos = presets.filter(p => p.type === 'video');
+        } catch (err) {
+          log(`   ⚠️ Failed to load media presets: ${err.message}`, 'warning');
+        }
+      }
+      
+      const allVideos = [...projectVideos, ...presetVideos];
+      
+      let videoToApply = null;
+      if (allVideos.length > 0) {
+        // Shuffle and find a valid video
+        const shuffled = [...allVideos].sort(() => Math.random() - 0.5);
+        for (const video of shuffled) {
+          if (window.electronAPI && video.path) {
+            try {
+              const info = await window.electronAPI.getFileInfo(video.path);
+              if (!info.error) {
+                videoToApply = video;
+                break;
+              }
+            } catch (err) {
+              // Ignore error, try next
+            }
+          } else {
+            videoToApply = video;
+            break;
+          }
+        }
+      }
+      
+      if (videoToApply) {
+        actions.setBackgroundVideo(videoToApply);
+        log(`   ✓ Applied random background video: "${videoToApply.name}"`, 'success');
+      } else {
+        actions.setBackgroundVideo(null);
+        log('   ⚠️ No background video available or all background videos are missing. Proceeding without a background.', 'warning');
+      }
+    },
+
+    /**
      * RENDER [output="path"] [codec=libx264] [crf=18] [fps=30]
      */
     async RENDER(args) {
@@ -867,6 +919,10 @@ export function createExecutor(actions, getState, log) {
 
       await window.electronAPI.endFrameExport();
       const result = await exportPromise;
+
+      if (finalAudioPath && finalAudioPath.includes('temp_mix_') && window.electronAPI.deleteFile) {
+        await window.electronAPI.deleteFile(finalAudioPath);
+      }
 
       if (result.success) {
         log(`✅ Render complete! Saved to: ${outputPath}`, 'success');
@@ -1134,7 +1190,10 @@ export const EXAMPLE_VBS = `# ════════════════�
 # Step 1: Load preset characters, assets, and voice setups
 LOAD_PRESET "Peter & Stewie"
 
-# Step 2: Parse the dialogue script
+# Step 2: Apply a random background video from the preset library
+APPLY_RANDOM_BACKGROUND
+
+# Step 3: Parse the dialogue script
 PARSE_SCRIPT """
 **Stewie:** Look, Peter, building a video editor inside Electron is easy if you don't choke the UI thread. You just overlay a fast canvas for the free-transform handles and offload the heavy rendering to a local FFmpeg binary.
 
@@ -1149,32 +1208,32 @@ PARSE_SCRIPT """
 **Peter:** Hehehe... bouncy. Like that time I bounced on that trampoline at Chris's birthday party.
 """
 
-# Step 3: Load the TTS model
+# Step 4: Load the TTS model
 LOAD_MODEL luxtts
 
-# Step 4: Configure character voices (including custom speed and temp parameters)
+# Step 5: Configure character voices (including custom speed and temp parameters)
 SET_VOICE stewie type=default speed=1.05 temperature=0.3
 SET_VOICE peter type=default speed=0.95 temperature=0.5
 
-# Step 5: Customize character styling (fonts, sizes, colors, highlighting)
+# Step 6: Customize character styling (fonts, sizes, colors, highlighting)
 SET_STYLE stewie color="#00e5ff" font="Impact" size=52 stroke_color="#000000" stroke_width=4
 SET_STYLE peter color="#ffab40" font="Arial" size=48 stroke_color="#000000" stroke_width=3
 
-# Step 6: Customize character animations (entrance, sustain, exit types & durations)
+# Step 7: Customize character animations (entrance, sustain, exit types & durations)
 SET_ANIMATION stewie entrance="pop" exit="slide-down" sustain="float" entrance_dur=0.4 exit_dur=0.4
 SET_ANIMATION peter entrance="slide-left" exit="slide-right" sustain="bounce" entrance_dur=0.3 exit_dur=0.3 sustain_intensity=0.7
 
-# Step 7: Generate and apply audio clips
+# Step 8: Generate and apply audio clips
 GENERATE_VOICES
 
-# Step 8: Apply generated audio to timeline
+# Step 9: Apply generated audio to timeline
 APPLY_VOICES
 
-# Step 9: Set export settings and render
+# Step 10: Set export settings and render
 SET fps 30
 RENDER output="family_guy_brainrot_ep1.mp4"
 
-# Step 10: Clean up GPU memory
+# Step 11: Clean up GPU memory
 UNLOAD_MODEL
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1197,7 +1256,12 @@ UNLOAD_MODEL
 #    - Custom user-created presets can also be loaded by their exact saved name.
 #    - Usage: LOAD_PRESET "Peter & Stewie"
 #
-# 2. PARSE_SCRIPT """[multi-line script]"""
+# 2. APPLY_RANDOM_BACKGROUND
+#    Chooses a random background video from the preset library or project media.
+#    - Skips background cleanly if no videos are found (preventing errors/crashes).
+#    - Usage: APPLY_RANDOM_BACKGROUND
+#
+# 3. PARSE_SCRIPT """[multi-line script]"""
 #    Parses raw dialog script into dialogue blocks on the timeline.
 #    - Format: **[Character Name]:** [Dialogue Text]
 #    - Lines without character headers are parsed or ignored.
@@ -1207,7 +1271,7 @@ UNLOAD_MODEL
 #      **Peter:** Hehehe, nice one Stewie.
 #      """
 #
-# 3. LOAD_MODEL [model_name]
+# 4. LOAD_MODEL [model_name]
 #    Loads TTS model weights into GPU VRAM.
 #    - Available models:
 #      - luxtts (LuxTTS 1.7B - ultra-fast lightweight voice cloner)
@@ -1215,7 +1279,7 @@ UNLOAD_MODEL
 #      - qwen3tts_1.7b (Qwen3-TTS 1.7B - premium quality model)
 #    - Usage: LOAD_MODEL luxtts
 #
-# 4. SET_VOICE [character_name] type=default|custom [speed=1.0] [temperature=0.5] [ref="path"] [text="transcript"]
+# 5. SET_VOICE [character_name] type=default|custom [speed=1.0] [temperature=0.5] [ref="path"] [text="transcript"]
 #    Binds a TTS voice profile to a parsed character name.
 #    - type="default": Resolves automatically from default voices (stewie, peter).
 #    - type="custom": Requires ref (local WAV path) and text (matching transcript).
@@ -1223,7 +1287,7 @@ UNLOAD_MODEL
 #    - temperature: Voice variance / randomness (default: 0.5).
 #    - Usage: SET_VOICE stewie type=default speed=1.05 temperature=0.3
 #
-# 5. SET_STYLE [character_name] [color=#HEX] [font="Family"] [size=px] [stroke_color=#HEX] [stroke_width=px] [show_bg=true|false] [bg_color="rgba(...)"] [bg_padding=px] [case_mode=uppercase|lowercase|none] [enable_highlight=true|false] [highlight_color=#HEX]
+# 6. SET_STYLE [character_name] [color=#HEX] [font="Family"] [size=px] [stroke_color=#HEX] [stroke_width=px] [show_bg=true|false] [bg_color="rgba(...)"] [bg_padding=px] [case_mode=uppercase|lowercase|none] [enable_highlight=true|false] [highlight_color=#HEX]
 #    Customizes text caption styling parameters for a specific character.
 #    - color: Primary font color hex code.
 #    - font: System or custom font family name (e.g. "Impact", "Arial").
@@ -1233,42 +1297,42 @@ UNLOAD_MODEL
 #    - enable_highlight & highlight_color: Configures active spoken word highlighting.
 #    - Usage: SET_STYLE stewie color="#00e5ff" font="Impact" size=52
 #
-# 6. SET_ANIMATION [character_name] [entrance=preset] [exit=preset] [sustain=preset] [entrance_dur=sec] [exit_dur=sec] [sustain_intensity=val] [sustain_speed=val]
+# 7. SET_ANIMATION [character_name] [entrance=preset] [exit=preset] [sustain=preset] [entrance_dur=sec] [exit_dur=sec] [sustain_intensity=val] [sustain_speed=val]
 #    Applies transition and motion animations to character images.
 #    - Available entrances/exits: slide-up, slide-down, slide-left, slide-right, pop, fade, zoom-spin, bounce, flip, slide-rotate
 #    - Available sustains: bounce, shake, float, none
 #    - entrance_dur & exit_dur: Transition animation length in seconds.
 #    - Usage: SET_ANIMATION stewie entrance="pop" exit="slide-down" sustain="float" entrance_dur=0.4 exit_dur=0.4
 #
-# 7. GENERATE_VOICES
+# 8. GENERATE_VOICES
 #    Triggers the active TTS model to synthesize WAV files for all dialogue blocks.
 #    - Voice clips are generated and automatically applied to the timeline in real-time.
 #    - Usage: GENERATE_VOICES
 #
-# 8. APPLY_VOICES
+# 9. APPLY_VOICES
 #    Safe no-op backup command. Automatically resolved during GENERATE_VOICES.
 #    - Usage: APPLY_VOICES
 #
-# 9. SET [property] [value]
-#    Configures project properties.
-#    - Supported properties:
-#      - fps: Frame rate of the final output (e.g. 30, 60).
-#      - resolution: Video dimensions in WIDTHxHEIGHT format (e.g. 1080x1920).
-#      - name: The internal automation project name.
-#    - Usage: SET fps 30
+# 10. SET [property] [value]
+#     Configures project properties.
+#     - Supported properties:
+#       - fps: Frame rate of the final output (e.g. 30, 60).
+#       - resolution: Video dimensions in WIDTHxHEIGHT format (e.g. 1080x1920).
+#       - name: The internal automation project name.
+#     - Usage: SET fps 30
 #
-# 10. RENDER [output="filename.mp4"]
-#     Triggers the rendering engine. Composes and exports the video to the output file.
-#     - output: Relative or absolute destination filename. Recommends saving to the downloads path.
-#     - Usage: RENDER output="output.mp4"
+# 11. RENDER [output="filename.mp4"]
+#      Triggers the rendering engine. Composes and exports the video to the output file.
+#      - output: Relative or absolute destination filename. Recommends saving to the downloads path.
+#      - Usage: RENDER output="output.mp4"
 #
-# 11. UNLOAD_MODEL
-#     Unloads the active TTS weights from GPU memory (VRAM). Always include this
-#     at the end of your script to free resources.
-#     - Usage: UNLOAD_MODEL
+# 12. UNLOAD_MODEL
+#      Unloads the active TTS weights from GPU memory (VRAM). Always include this
+#      at the end of your script to free resources.
+#      - Usage: UNLOAD_MODEL
 #
-# 12. WAIT [seconds]
-#     Pauses script execution for the specified time.
-#     - Usage: WAIT 5
+# 13. WAIT [seconds]
+#      Pauses script execution for the specified time.
+#      - Usage: WAIT 5
 # ══════════════════════════════════════════════════════════════════════════════
 `;

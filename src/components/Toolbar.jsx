@@ -34,18 +34,12 @@ export default function Toolbar({ onToggleConsole, isConsoleOpen }) {
 
   const tools = [
     { id: 'select', label: 'Select', shortcut: 'V' },
-    { id: 'cut', label: 'Cut', shortcut: 'C' },
-    { id: 'hand', label: 'Hand', shortcut: 'H' },
   ];
 
   const renderToolIcon = (toolId) => {
     switch (toolId) {
       case 'select':
         return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>;
-      case 'cut':
-        return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>;
-      case 'hand':
-        return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5m4 0V8a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v3m4 0v1a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5v-2a2 2 0 0 1 2-2v0a2 2 0 0 1 2 2v3"/></svg>;
       default:
         return null;
     }
@@ -57,8 +51,6 @@ export default function Toolbar({ onToggleConsole, isConsoleOpen }) {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       switch (e.key.toLowerCase()) {
         case 'v': actions.setActiveTool('select'); break;
-        case 'c': actions.setActiveTool('cut'); break;
-        case 'h': actions.setActiveTool('hand'); break;
       }
     };
     window.addEventListener('keydown', handleKeyDown);

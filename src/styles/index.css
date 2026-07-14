@@ -265,6 +265,54 @@ body.theme-red .toolbar__btn--accent:hover {
   opacity: 1;
 }
 
+/* Remove All Button base class styling */
+.panel__action-btn.panel__action-btn--remove-all {
+  font-size: 11px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+  font-weight: 600;
+  cursor: pointer;
+  height: 26px;
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.panel__action-btn.panel__action-btn--remove-all:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  opacity: 1;
+}
+
+/* Delete All Button base class styling */
+.panel__action-btn.panel__action-btn--delete-all {
+  font-size: 11px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 82, 82, 0.1);
+  color: var(--accent-error);
+  border: 1px solid var(--accent-error);
+  font-weight: 600;
+  cursor: pointer;
+  height: 26px;
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.panel__action-btn.panel__action-btn--delete-all:hover {
+  background: var(--accent-error);
+  color: #ffffff;
+  opacity: 1;
+}
+
 /* ── Reset & Base ── */
 *, *::before, *::after {
   margin: 0;
@@ -2190,3 +2238,105 @@ html, body, #root {
   color: #fff;
   border-color: #f44336;
 }
+
+/* ── Media Preset Library ── */
+.media-section {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+  height: 100%;
+}
+
+.media-section__header {
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.media-section__title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.media-voice-actions-bar {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-subtle);
+  align-items: center;
+  width: 100%;
+}
+
+.media-voice-actions-bar .panel__action-btn {
+  flex: 1;
+  justify-content: center;
+}
+
+.media-library-modes {
+  display: flex;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--surface-1);
+}
+
+.media-library-mode-btn {
+  flex: 1;
+  padding: 10px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.15s ease;
+}
+
+.media-library-mode-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.media-library-mode-btn--active {
+  background: var(--surface-2);
+  border-bottom-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.media-preset-library {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.media-item__preset-save-btn {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ffb300;
+  border: 1px solid rgba(255, 179, 0, 0.4);
+  font-size: 9px;
+  font-weight: bold;
+  padding: 2px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  z-index: 10;
+  transition: all 0.15s ease;
+}
+
+.media-item__preset-save-btn:hover {
+  background: #ffb300;
+  color: #000;
+}
+

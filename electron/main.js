@@ -96,6 +96,37 @@ function getFFmpegPath() {
 let mainWindow;
 const isDev = !app.isPackaged;
 
+function cleanTemporaryArtifacts() {
+  try {
+    const distPath = path.join(__dirname, '..', 'dist');
+    if (!fs.existsSync(distPath)) return;
+
+    // 1. Clean temp_mix_*.wav files in dist
+    const files = fs.readdirSync(distPath);
+    files.forEach(file => {
+      if (file.startsWith('temp_mix_') && file.endsWith('.wav')) {
+        const filePath = path.join(distPath, file);
+        fs.unlinkSync(filePath);
+      }
+    });
+
+    // 2. Clean generated session voices in dist/voices
+    const voicesPath = path.join(distPath, 'voices');
+    if (fs.existsSync(voicesPath)) {
+      const dirs = fs.readdirSync(voicesPath);
+      dirs.forEach(dir => {
+        const dirPath = path.join(voicesPath, dir);
+        if (fs.statSync(dirPath).isDirectory()) {
+          fs.rmSync(dirPath, { recursive: true, force: true });
+        }
+      });
+    }
+    console.log('[Main] Startup temporary files cleanup complete.');
+  } catch (err) {
+    console.error('[Main] Failed to clean temporary artifacts on launch:', err);
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -137,6 +168,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  cleanTemporaryArtifacts();
   createWindow();
   startPythonServer();
 });
@@ -801,6 +833,95 @@ ipcMain.handle('delete-character-preset', async (event, presetName) => {
       let presets = JSON.parse(fs.readFileSync(charPresetsFilePath, 'utf8'));
       presets = presets.filter(p => p.name.toLowerCase() !== presetName.toLowerCase());
       fs.writeFileSync(charPresetsFilePath, JSON.stringify(presets, null, 2), 'utf8');
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+const mediaPresetsDir = path.join(__dirname, '..', 'presets', 'media');
+const mediaPresetsFilePath = path.join(mediaPresetsDir, 'media_presets.json');
+
+ipcMain.handle('save-media-preset', async (event, { filePath, name, type, duration }) => {
+  try {
+    const destSubdir = type === 'video' ? 'videos' : type === 'image' ? 'photos' : type === 'audio' ? 'audio' : 'voices';
+    const targetDir = path.join(mediaPresetsDir, destSubdir);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    const ext = path.extname(filePath);
+    const baseName = path.basename(filePath, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+    let targetFileName = `${baseName}${ext}`;
+    let targetPath = path.join(targetDir, targetFileName);
+
+    // If filename exists, generate unique name
+    let counter = 1;
+    while (fs.existsSync(targetPath)) {
+      targetFileName = `${baseName}_${counter}${ext}`;
+      targetPath = path.join(targetDir, targetFileName);
+      counter++;
+    }
+
+    // Copy file to target path
+    fs.copyFileSync(filePath, targetPath);
+
+    // Read index and add preset metadata
+    let presets = [];
+    if (fs.existsSync(mediaPresetsFilePath)) {
+      presets = JSON.parse(fs.readFileSync(mediaPresetsFilePath, 'utf8'));
+    }
+
+    const newPreset = {
+      id: `preset_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: name,
+      type: type,
+      ext: ext,
+      path: targetPath,
+      dataUrl: `file:///${targetPath.replace(/\\/g, '/')}`,
+      duration: duration
+    };
+
+    presets.push(newPreset);
+    fs.writeFileSync(mediaPresetsFilePath, JSON.stringify(presets, null, 2), 'utf8');
+
+    return { success: true, preset: newPreset };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('load-media-presets', async () => {
+  try {
+    if (fs.existsSync(mediaPresetsFilePath)) {
+      const presets = JSON.parse(fs.readFileSync(mediaPresetsFilePath, 'utf8'));
+      // Only keep presets where the file actually exists
+      const validPresets = presets.filter(p => fs.existsSync(p.path));
+      if (validPresets.length !== presets.length) {
+        fs.writeFileSync(mediaPresetsFilePath, JSON.stringify(validPresets, null, 2), 'utf8');
+      }
+      return validPresets;
+    }
+    return [];
+  } catch (err) {
+    console.error('Failed to load media presets:', err);
+    return [];
+  }
+});
+
+ipcMain.handle('delete-media-preset', async (event, presetId) => {
+  try {
+    if (fs.existsSync(mediaPresetsFilePath)) {
+      let presets = JSON.parse(fs.readFileSync(mediaPresetsFilePath, 'utf8'));
+      const preset = presets.find(p => p.id === presetId);
+      if (preset) {
+        if (fs.existsSync(preset.path)) {
+          fs.unlinkSync(preset.path);
+        }
+        presets = presets.filter(p => p.id !== presetId);
+        fs.writeFileSync(mediaPresetsFilePath, JSON.stringify(presets, null, 2), 'utf8');
+      }
     }
     return { success: true };
   } catch (err) {
