@@ -233,6 +233,39 @@ ipcMain.handle('get-gpu-acceleration', async () => {
   return true;
 });
 
+ipcMain.handle('detect-gpu-codecs', async () => {
+  return new Promise((resolve) => {
+    const ffmpegPath = getFFmpegPath();
+    const { execFile } = require('child_process');
+    execFile(ffmpegPath, ['-encoders'], (error, stdout, stderr) => {
+      const codecs = {
+        h264_nvenc: false,
+        h264_amf: false,
+        h264_qsv: false,
+      };
+      if (error) {
+        console.error('[Main] Failed to detect GPU codecs:', error);
+        resolve(codecs);
+        return;
+      }
+      const output = stdout + stderr;
+      codecs.h264_nvenc = output.includes('h264_nvenc');
+      codecs.h264_amf = output.includes('h264_amf');
+      codecs.h264_qsv = output.includes('h264_qsv');
+      console.log('[Main] Detected GPU codecs:', codecs);
+      resolve(codecs);
+    });
+  });
+});
+
+ipcMain.handle('check-file-exists', async (event, filePath) => {
+  try {
+    return fs.existsSync(filePath);
+  } catch (err) {
+    return false;
+  }
+});
+
 // File dialog
 ipcMain.handle('open-file-dialog', async (event, options) => {
   const result = await dialog.showOpenDialog(mainWindow, {

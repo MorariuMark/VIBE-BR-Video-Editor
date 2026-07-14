@@ -365,6 +365,34 @@ export default function PreviewCanvas() {
     };
   }, [render]);
 
+  // Keep ref of state to avoid stale closure in playback tick
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  const getClipVolumeAtTime = (clip, time) => {
+    const baseVolume = clip.volume ?? 1.0;
+    const fadeIn = clip.fadeInDuration ?? 0;
+    const fadeOut = clip.fadeOutDuration ?? 0;
+    
+    if (time < clip.startTime || time > clip.startTime + clip.duration) {
+      return 0;
+    }
+    
+    if (fadeIn > 0 && time < clip.startTime + fadeIn) {
+      const factor = (time - clip.startTime) / fadeIn;
+      return baseVolume * Math.max(0, Math.min(1, factor));
+    }
+    
+    if (fadeOut > 0 && time > clip.startTime + clip.duration - fadeOut) {
+      const factor = (clip.startTime + clip.duration - time) / fadeOut;
+      return baseVolume * Math.max(0, Math.min(1, factor));
+    }
+    
+    return baseVolume;
+  };
+
   // Playback timer
   useEffect(() => {
     if (!state.isPlaying) {
@@ -379,22 +407,35 @@ export default function PreviewCanvas() {
     const tick = () => {
       if (!playStartRef.current) return;
       const elapsed = (performance.now() - playStartRef.current) / 1000;
-      if (elapsed >= state.totalDuration) {
+      if (elapsed >= stateRef.current.totalDuration) {
         actions.setPlaying(false);
         actions.setCurrentTime(0);
         localTimeRef.current = 0;
+        window.dispatchEvent(new CustomEvent('timeupdate', { detail: 0 }));
         return;
       }
 
       // Update local unthrottled time ref
       localTimeRef.current = elapsed;
+      window.dispatchEvent(new CustomEvent('timeupdate', { detail: elapsed }));
 
-      // Throttled dispatch to React state once every 100ms
-      const now = performance.now();
-      if (now - lastDispatchRef.current > 100) {
-        actions.setCurrentTime(elapsed);
-        lastDispatchRef.current = now;
-      }
+      // Update audio volumes for active audio/video clips based on fades
+      stateRef.current.tracks.forEach(track => {
+        if (track.type === 'audio' || track.type === 'video' || track.type === 'broll' || track.type === 'window') {
+          track.clips.forEach(clip => {
+            const audioEl = audioElementsRef.current[clip.id];
+            const videoEl = videoElementsRef.current[clip.id];
+            if (audioEl) {
+              audioEl.volume = getClipVolumeAtTime(clip, elapsed);
+            }
+            if (videoEl) {
+              const vol = getClipVolumeAtTime(clip, elapsed);
+              videoEl.muted = vol === 0;
+              videoEl.volume = vol;
+            }
+          });
+        }
+      });
 
       playbackAnimFrameRef.current = requestAnimationFrame(tick);
     };
@@ -407,10 +448,71 @@ export default function PreviewCanvas() {
       // Ensure we write back the final precise time on stop/pause
       if (playStartRef.current) {
         const elapsed = (performance.now() - playStartRef.current) / 1000;
-        actions.setCurrentTime(Math.min(state.totalDuration, elapsed));
+        actions.setCurrentTime(Math.min(stateRef.current.totalDuration, elapsed));
       }
     };
   }, [state.isPlaying]);
+
+  // Direct DOM listener for the preview time label to run smoothly at 60 FPS
+  useEffect(() => {
+    const label = document.querySelector('.preview-time--current');
+    const onTimeUpdate = (e) => {
+      const t = e.detail;
+      if (label) {
+        label.textContent = formatTime(t);
+      }
+    };
+    window.addEventListener('timeupdate', onTimeUpdate);
+    return () => window.removeEventListener('timeupdate', onTimeUpdate);
+  }, []);
+
+  // Handle double clicking subtitles directly on canvas to edit text on-the-fly
+  const handleCanvasDoubleClick = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    const scaleFactor = canvasSize.width / state.canvasWidth;
+    const canvasMouseX = x / scaleFactor;
+    const canvasMouseY = y / scaleFactor;
+
+    const renderTime = state.isPlaying ? localTimeRef.current : state.currentTime;
+    const activeBlocks = getActiveBlocks(state.dialogueBlocks, renderTime);
+    if (activeBlocks.length === 0) return;
+
+    // Check if double-clicked inside any active caption bounds
+    for (const block of activeBlocks) {
+      const captionKey = `caption_${block.characterId}`;
+      const defaultCaptionTransform = {
+        x: state.canvasWidth / 2,
+        y: state.canvasHeight * 0.85,
+        scale: 1
+      };
+      const captionTransform = state.characterTransforms[captionKey] || defaultCaptionTransform;
+      const cx = captionTransform.x;
+      const cy = captionTransform.y;
+
+      const dx = Math.abs(canvasMouseX - cx);
+      const dy = Math.abs(canvasMouseY - cy);
+
+      // 80% width cushion, 60px height cushion scaled by transform
+      if (dx < state.canvasWidth * 0.4 * captionTransform.scale && dy < 60 * captionTransform.scale) {
+        // Stop playback if playing so they can edit
+        if (state.isPlaying) {
+          actions.setPlaying(false);
+        }
+        
+        const newText = prompt(`Edit Caption for ${block.characterName}:`, block.text);
+        if (newText !== null && newText.trim() !== "") {
+          actions.updateBlock(block.id, { text: newText });
+          actions.addToast("Caption updated successfully!", "success");
+        }
+        break;
+      }
+    }
+  };
 
   // ── Mouse interaction for free transform ──
   const handleCanvasMouseDown = (e) => {
@@ -1443,6 +1545,7 @@ export default function PreviewCanvas() {
             width={canvasSize.width}
             height={canvasSize.height}
             onMouseDown={handleCanvasMouseDown}
+            onDoubleClick={handleCanvasDoubleClick}
             onMouseMove={dragging ? undefined : handleCanvasMouseMove}
             onMouseUp={dragging ? undefined : handleCanvasMouseUp}
             onWheel={handleCanvasWheel}
@@ -1484,7 +1587,7 @@ export default function PreviewCanvas() {
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M13 6v12l8.5-6L13 6zm-.5 6L4 18V6l8.5 6z"/></svg>
         </button>
-        <span className="preview-time">{formatTime(state.currentTime)}</span>
+        <span className="preview-time preview-time--current">{formatTime(state.currentTime)}</span>
         <span style={{ color: 'var(--text-disabled)', fontSize: 'var(--text-xs)' }}>/</span>
         <span className="preview-time" style={{ color: 'var(--text-tertiary)' }}>
           {formatTime(state.totalDuration)}

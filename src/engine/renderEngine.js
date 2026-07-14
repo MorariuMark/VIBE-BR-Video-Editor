@@ -189,6 +189,23 @@ export function getCaptionTextForTime(text, startTime, duration, currentTime, wo
   return info ? info.text : '';
 }
 
+export function calculateClipOpacity(clip, time) {
+  if (!clip) return 1.0;
+  const fadeIn = clip.fadeInDuration ?? 0;
+  const fadeOut = clip.fadeOutDuration ?? 0;
+  
+  if (time >= clip.startTime && time <= clip.startTime + clip.duration) {
+    if (fadeIn > 0 && time < clip.startTime + fadeIn) {
+      return Math.max(0, Math.min(1, (time - clip.startTime) / fadeIn));
+    }
+    if (fadeOut > 0 && time > clip.startTime + clip.duration - fadeOut) {
+      return Math.max(0, Math.min(1, (clip.startTime + clip.duration - time) / fadeOut));
+    }
+    return 1.0;
+  }
+  return 0.0;
+}
+
 export function drawFrame(ctx, { state, time, width, height, loadedImages, videoElement, drawHandles, transparentBackground, transformMode, activeAxis }) {
   const scaleFactor = width / state.canvasWidth;
   const activeBlocks = getActiveBlocks(state.dialogueBlocks, time);
@@ -226,6 +243,9 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
       if (transparentBackground) return;
       const activeClip = track.clips.find(clip => time >= clip.startTime && time < clip.startTime + clip.duration);
       if (!activeClip) return;
+
+      ctx.save();
+      ctx.globalAlpha = calculateClipOpacity(activeClip, time);
 
       if (activeClip.type === 'video') {
         const v = (videoElement && videoElement[activeClip.id]) || 
@@ -266,6 +286,7 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, width, height);
         }
       }
+      ctx.restore();
     } else if (track.type === 'window') {
       const activeClip = track.clips.find(clip => time >= clip.startTime && time < clip.startTime + clip.duration);
       if (activeClip) {
@@ -304,6 +325,7 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
         const drawY = -drawH / 2;
 
         ctx.save();
+        ctx.globalAlpha = calculateClipOpacity(activeClip, time);
         
         ctx.translate(cx, cy);
         ctx.rotate((transform.rotation * Math.PI) / 180);
@@ -417,6 +439,7 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
       }
 
       ctx.save();
+      ctx.globalAlpha = calculateClipOpacity(activeClip, time);
 
       if (state.brollLayout === 'split') {
         ctx.beginPath();
@@ -805,8 +828,30 @@ export function drawFrame(ctx, { state, time, width, height, loadedImages, video
             const isActive = isHighlightEnabled && (runningWordIdx === activeWordInfo.activeWordIndex);
             const highlightCol = style.highlightColor || '#ffd21e';
 
-            ctx.fillStyle = isActive ? highlightCol : (style.color || '#ffffff');
-            ctx.fillText(displayWord, wordX, lineY);
+            const scaleBounce = style.scaleBounce === true;
+            if (isActive && scaleBounce) {
+              ctx.save();
+              const wordW = ctx.measureText(displayWord).width;
+              const wordCx = wordX + wordW / 2;
+              
+              ctx.translate(wordCx, lineY);
+              ctx.scale(1.18, 1.18); // scale bounce highlight
+              
+              ctx.fillStyle = highlightCol;
+              
+              if (style.strokeColor && style.strokeWidth > 0) {
+                ctx.strokeStyle = style.strokeColor;
+                ctx.lineWidth = style.strokeWidth * scaleFactor;
+                ctx.lineJoin = 'round';
+                ctx.strokeText(displayWord, -wordW / 2, 0);
+              }
+              
+              ctx.fillText(displayWord, -wordW / 2, 0);
+              ctx.restore();
+            } else {
+              ctx.fillStyle = isActive ? highlightCol : (style.color || '#ffffff');
+              ctx.fillText(displayWord, wordX, lineY);
+            }
 
             runningWordIdx++;
           });

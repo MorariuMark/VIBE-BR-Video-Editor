@@ -1124,26 +1124,185 @@ export function createExecutor(actions, getState, log) {
 
     log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'system');
     log('🚀 VBS Execution Started', 'system');
-    log(`   ${commands.length} commands to execute`, 'system');
+    log(`   ${commands.length} commands parsed`, 'system');
     log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'system');
 
     const startTime = Date.now();
 
-    for (let i = 0; i < commands.length; i++) {
+    // 1. Scan and resolve matching control structures (IF/ELSE/ENDIF, FOR/ENDFOR)
+    const jumpTargets = {};
+    const controlStack = [];
+
+    try {
+      for (let idx = 0; idx < commands.length; idx++) {
+        const cmd = commands[idx];
+        if (cmd.command === 'FOR' || cmd.command === 'IF') {
+          controlStack.push({ index: idx, command: cmd.command });
+        } else if (cmd.command === 'ELSE') {
+          const top = controlStack[controlStack.length - 1];
+          if (!top || top.command !== 'IF') {
+            throw new Error(`ELSE without matching IF (line ${cmd.line})`);
+          }
+          jumpTargets[top.index] = idx + 1; // IF jumps to ELSE + 1 if false
+          controlStack.push({ index: idx, command: 'ELSE' });
+        } else if (cmd.command === 'ENDFOR') {
+          const top = controlStack.pop();
+          if (!top || top.command !== 'FOR') {
+            throw new Error(`ENDFOR without matching FOR (line ${cmd.line})`);
+          }
+          jumpTargets[top.index] = idx + 1; // FOR jumps to ENDFOR + 1 when loop completes
+          jumpTargets[idx] = top.index; // ENDFOR jumps back to FOR condition check
+        } else if (cmd.command === 'ENDIF') {
+          const top = controlStack.pop();
+          if (top && top.command === 'ELSE') {
+            const topElse = top;
+            controlStack.pop(); // pop the matching IF
+            jumpTargets[topElse.index] = idx + 1; // ELSE jumps to ENDIF + 1
+          } else if (top && top.command === 'IF') {
+            jumpTargets[top.index] = idx + 1; // IF jumps to ENDIF + 1 if false
+          } else {
+            throw new Error(`ENDIF without matching IF (line ${cmd.line})`);
+          }
+        }
+      }
+      if (controlStack.length > 0) {
+        const unclosed = controlStack.pop();
+        throw new Error(`Unclosed control structure: ${unclosed.command} (line ${commands[unclosed.index].line})`);
+      }
+    } catch (parseErr) {
+      log(`❌ Control Flow Compilation Error: ${parseErr.message}`, 'error');
+      return { success: false, error: parseErr.message };
+    }
+
+    let ip = 0;
+    const variables = {};
+
+    while (ip < commands.length) {
       checkAbort();
+      const cmd = commands[ip];
 
-      const cmd = commands[i];
-      const handler = handlers[cmd.command];
+      // Perform variable substitution
+      let resolvedArgs = cmd.args || '';
+      resolvedArgs = resolvedArgs.replace(/\$(\w+)|\$\{(\w+)\}/g, (match, p1, p2) => {
+        const name = p1 || p2;
+        return variables.hasOwnProperty(name) ? String(variables[name]) : match;
+      });
 
-      if (!handler) {
-        log(`❌ Unknown command: "${cmd.command}" (line ${cmd.line})`, 'error');
-        throw new Error(`Unknown command "${cmd.command}". Valid commands: ${Object.keys(handlers).join(', ')}`);
+      // Special control flow handlers
+      if (cmd.command === 'SET') {
+        const spaceIdx = resolvedArgs.indexOf('=');
+        if (spaceIdx === -1) {
+          const { positional } = parseArgs(resolvedArgs);
+          if (positional.length >= 2) {
+            variables[positional[0]] = positional[1];
+          } else {
+            throw new Error(`SET command requires variable name and value. Example: SET speed = 1.2 (line ${cmd.line})`);
+          }
+        } else {
+          const varName = resolvedArgs.substring(0, spaceIdx).trim();
+          const varVal = stripQuotes(resolvedArgs.substring(spaceIdx + 1).trim());
+          variables[varName] = varVal;
+        }
+        ip++;
+        continue;
       }
 
-      log(`\n[${i + 1}/${commands.length}] ${cmd.command} ${cmd.args ? '...' : ''}`, 'system');
+      if (cmd.command === 'FOR') {
+        const spaceIdx = resolvedArgs.indexOf('=');
+        if (spaceIdx === -1) {
+          throw new Error(`FOR command requires "=" assignment. Example: FOR i = 1 TO 5 (line ${cmd.line})`);
+        }
+        const varName = resolvedArgs.substring(0, spaceIdx).trim();
+        const rangeStr = resolvedArgs.substring(spaceIdx + 1).trim();
+        const toIdx = rangeStr.toUpperCase().indexOf(' TO ');
+        if (toIdx === -1) {
+          throw new Error(`FOR command range requires "TO". Example: FOR i = 1 TO 5 (line ${cmd.line})`);
+        }
+        const startVal = parseInt(rangeStr.substring(0, toIdx).trim());
+        const endVal = parseInt(rangeStr.substring(toIdx + 4).trim());
+
+        if (isNaN(startVal) || isNaN(endVal)) {
+          throw new Error(`FOR command range must be valid integers (line ${cmd.line})`);
+        }
+
+        if (!variables.hasOwnProperty(varName)) {
+          variables[varName] = startVal;
+        }
+
+        if (variables[varName] > endVal) {
+          delete variables[varName];
+          ip = jumpTargets[ip]; // Exit loop
+        } else {
+          ip++;
+        }
+        continue;
+      }
+
+      if (cmd.command === 'ENDFOR') {
+        const forIp = jumpTargets[ip];
+        const forCmd = commands[forIp];
+        const spaceIdx = forCmd.args.indexOf('=');
+        const varName = forCmd.args.substring(0, spaceIdx).trim();
+        
+        variables[varName] = (parseInt(variables[varName]) || 0) + 1;
+        ip = forIp; // Loop back
+        continue;
+      }
+
+      if (cmd.command === 'IF') {
+        let condition = false;
+        const compIdx = resolvedArgs.indexOf('==');
+        const neIdx = resolvedArgs.indexOf('!=');
+
+        if (compIdx !== -1) {
+          const lhs = resolvedArgs.substring(0, compIdx).trim();
+          const rhs = stripQuotes(resolvedArgs.substring(compIdx + 2).trim());
+          condition = (lhs === rhs);
+        } else if (neIdx !== -1) {
+          const lhs = resolvedArgs.substring(0, neIdx).trim();
+          const rhs = stripQuotes(resolvedArgs.substring(neIdx + 2).trim());
+          condition = (lhs !== rhs);
+        } else if (resolvedArgs.startsWith('FILE_EXISTS(') && resolvedArgs.endsWith(')')) {
+          const filePath = stripQuotes(resolvedArgs.substring(12, resolvedArgs.length - 1));
+          if (window.electronAPI && window.electronAPI.checkFileExists) {
+            condition = await window.electronAPI.checkFileExists(filePath);
+          } else {
+            condition = false;
+          }
+        } else {
+          condition = !!resolvedArgs && resolvedArgs !== 'false' && resolvedArgs !== '0';
+        }
+
+        if (!condition) {
+          ip = jumpTargets[ip]; // Jump to ELSE or ENDIF
+        } else {
+          ip++;
+        }
+        continue;
+      }
+
+      if (cmd.command === 'ELSE') {
+        ip = jumpTargets[ip]; // Jump over ELSE block
+        continue;
+      }
+
+      if (cmd.command === 'ENDIF') {
+        ip++;
+        continue;
+      }
+
+      // Standard commands
+      const handler = handlers[cmd.command];
+      if (!handler) {
+        log(`❌ Unknown command: "${cmd.command}" (line ${cmd.line})`, 'error');
+        throw new Error(`Unknown command "${cmd.command}".`);
+      }
+
+      log(`\n[Line ${cmd.line}] ${cmd.command} ${resolvedArgs ? '...' : ''}`, 'system');
 
       try {
-        await handler(cmd.args);
+        await handler(resolvedArgs);
+        ip++;
       } catch (err) {
         log(`🔄 Error/Abort encountered. Automatically unloading model from GPU memory to free VRAM...`, 'warning');
         try {

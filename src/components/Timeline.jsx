@@ -730,6 +730,41 @@ export default function Timeline() {
                   </span>
                 </div>
               )}
+
+              {/* Fade transitions controls for all clip types */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 12 }}>
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Fade In:</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  step="0.1"
+                  style={{ width: 42, height: 18, background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', borderRadius: 3, color: 'var(--text-primary)', fontSize: '10px', padding: '0 2px' }}
+                  value={selectedClip.fadeInDuration ?? 0}
+                  onChange={(e) => {
+                    const val = Math.max(0, Math.min(10, parseFloat(e.target.value) || 0));
+                    actions.updateClipProperties(selectedClipTrack.id, selectedClip.id, { fadeInDuration: val });
+                  }}
+                />
+                <span style={{ fontSize: '9px', color: 'var(--text-disabled)' }}>s</span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 12 }}>
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Fade Out:</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  step="0.1"
+                  style={{ width: 42, height: 18, background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', borderRadius: 3, color: 'var(--text-primary)', fontSize: '10px', padding: '0 2px' }}
+                  value={selectedClip.fadeOutDuration ?? 0}
+                  onChange={(e) => {
+                    const val = Math.max(0, Math.min(10, parseFloat(e.target.value) || 0));
+                    actions.updateClipProperties(selectedClipTrack.id, selectedClip.id, { fadeOutDuration: val });
+                  }}
+                />
+                <span style={{ fontSize: '9px', color: 'var(--text-disabled)' }}>s</span>
+              </div>
             </>
           )}
 

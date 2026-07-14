@@ -10,6 +10,7 @@ export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRu
   const { state, actions } = useProject();
   const [script, setScript] = useState('');
   const [logs, setLogs] = useState([]);
+  const [errors, setErrors] = useState([]);
   const executorRef = useRef(null);
   const logEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -28,6 +29,101 @@ export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRu
       logEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [logs]);
+
+  // Syntax validation utility for VBS console
+  const validateScript = useCallback((text) => {
+    if (!text.trim()) {
+      setErrors([]);
+      return;
+    }
+    const lines = text.replace(/\r\n/g, '\n').split('\n');
+    const errs = [];
+    const validCommands = new Set([
+      'LOAD_PRESET', 'LOAD_MODEL', 'SET_VOICE', 'PARSE_SCRIPT', 
+      'APPLY_RANDOM_BACKGROUND', 'GENERATE_VOICES', 'APPLY_VOICES', 
+      'RENDER', 'UNLOAD_MODEL', 'SET', 'FOR', 'ENDFOR', 'IF', 'ELSE', 'ENDIF',
+      'WAIT', 'SET_STYLE', 'SET_ANIMATION'
+    ]);
+
+    const controlStack = [];
+    let inMultiLine = false;
+
+    for (let idx = 0; idx < lines.length; idx++) {
+      const lineNum = idx + 1;
+      const rawLine = lines[idx].trim();
+
+      if (!rawLine || rawLine.startsWith('#')) continue;
+
+      if (rawLine.includes('"""')) {
+        const firstIdx = rawLine.indexOf('"""');
+        const secondIdx = rawLine.indexOf('"""', firstIdx + 3);
+        if (secondIdx === -1) {
+          inMultiLine = !inMultiLine;
+        }
+        continue;
+      }
+
+      if (inMultiLine) continue;
+
+      const spaceIdx = rawLine.indexOf(' ');
+      const command = (spaceIdx === -1 ? rawLine : rawLine.substring(0, spaceIdx)).toUpperCase();
+
+      if (!validCommands.has(command)) {
+        errs.push({ line: lineNum, message: `Unknown command "${command}"` });
+        continue;
+      }
+
+      if (command === 'FOR' || command === 'IF') {
+        controlStack.push({ command, line: lineNum });
+      } else if (command === 'ELSE') {
+        const top = controlStack[controlStack.length - 1];
+        if (!top || top.command !== 'IF') {
+          errs.push({ line: lineNum, message: `ELSE without matching IF` });
+        }
+      } else if (command === 'ENDFOR') {
+        const top = controlStack.pop();
+        if (!top || top.command !== 'FOR') {
+          errs.push({ line: lineNum, message: `ENDFOR without matching FOR` });
+        }
+      } else if (command === 'ENDIF') {
+        const top = controlStack.pop();
+        if (top && top.command === 'ELSE') {
+          controlStack.pop(); // pop matching IF
+        } else if (top && top.command === 'IF') {
+          // matched
+        } else {
+          errs.push({ line: lineNum, message: `ENDIF without matching IF` });
+        }
+      }
+    }
+
+    while (controlStack.length > 0) {
+      const unclosed = controlStack.pop();
+      errs.push({ line: unclosed.line, message: `Unclosed control structure: ${unclosed.command}` });
+    }
+
+    setErrors(errs);
+  }, []);
+
+  useEffect(() => {
+    validateScript(script);
+  }, [script, validateScript]);
+
+  const insertSnippet = useCallback((snippetText) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setScript(prev => prev + '\n' + snippetText);
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const newVal = script.substring(0, start) + '\n' + snippetText + '\n' + script.substring(end);
+    setScript(newVal);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.selectionStart = textarea.selectionEnd = start + snippetText.length + 2;
+    });
+  }, [script]);
 
   const addLog = useCallback((message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -227,9 +323,35 @@ export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRu
       {/* Main content: editor + log split */}
       <div className="automation-console__body">
         {/* Left: Script Editor */}
-        <div className="automation-console__editor">
+        <div className="automation-console__editor" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="automation-console__editor-label">
             <span>Script</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className="automation-console__snippet-btn"
+                onClick={() => insertSnippet('FOR i = 1 TO 3\n  APPLY_RANDOM_BACKGROUND\nENDFOR')}
+                style={{ fontSize: '9px', padding: '2px 6px', background: 'var(--surface-2)', border: 'none', borderRadius: 3, color: 'var(--text-secondary)', cursor: 'pointer' }}
+                title="Insert a FOR loop snippet"
+              >
+                + Loop
+              </button>
+              <button
+                className="automation-console__snippet-btn"
+                onClick={() => insertSnippet('IF FILE_EXISTS("presets/media/videos/bg.mp4")\n  # do something\nENDIF')}
+                style={{ fontSize: '9px', padding: '2px 6px', background: 'var(--surface-2)', border: 'none', borderRadius: 3, color: 'var(--text-secondary)', cursor: 'pointer' }}
+                title="Insert an IF conditional check snippet"
+              >
+                + Condition
+              </button>
+              <button
+                className="automation-console__snippet-btn"
+                onClick={() => insertSnippet('SET speed = 1.25\nLOAD_MODEL luxtts\nSET_VOICE char_stewie speed=$speed')}
+                style={{ fontSize: '9px', padding: '2px 6px', background: 'var(--surface-2)', border: 'none', borderRadius: 3, color: 'var(--text-secondary)', cursor: 'pointer' }}
+                title="Insert a SET variables snippet"
+              >
+                + Variable
+              </button>
+            </div>
             <span className="automation-console__line-count">
               {script.split('\n').length} lines
             </span>
@@ -237,6 +359,7 @@ export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRu
           <textarea
             ref={textareaRef}
             className="automation-console__textarea"
+            style={{ flex: 1 }}
             value={script}
             onChange={(e) => setScript(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -244,6 +367,23 @@ export default function AutomationConsole({ isOpen, onToggle, isRunning, setIsRu
             spellCheck={false}
             disabled={isRunning}
           />
+          {errors.length > 0 && (
+            <div className="automation-console__errors-panel" style={{
+              background: 'rgba(255,82,82,0.1)',
+              borderTop: '1px solid var(--accent-danger, #ff4081)',
+              padding: '6px 12px',
+              fontSize: 'var(--text-xs)',
+              maxHeight: 80,
+              overflowY: 'auto'
+            }}>
+              {errors.map((err, idx) => (
+                <div key={idx} style={{ color: 'var(--accent-danger, #ff5252)', display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontWeight: 'bold' }}>Line {err.line}:</span>
+                  <span>{err.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Divider */}

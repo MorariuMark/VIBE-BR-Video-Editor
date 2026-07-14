@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useProject } from '../store/ProjectContext';
 import { EXPORT_PRESETS, generateFFmpegCommand } from '../engine/exportEngine';
 import { drawFrame } from '../engine/renderEngine';
@@ -11,6 +11,28 @@ export default function ExportModal() {
   const [selectedPreset, setSelectedPreset] = useState('tiktok-vertical');
   const [renderMethod, setRenderMethod] = useState('canvas');
   const cancelExportRef = useRef(false);
+
+  const [supportedCodecs, setSupportedCodecs] = useState({
+    h264_nvenc: false,
+    h264_amf: false,
+    h264_qsv: false,
+  });
+
+  // Query FFmpeg capabilities to auto-detect supported GPU codecs
+  useEffect(() => {
+    if (state.showExportModal && window.electronAPI && window.electronAPI.detectGpuCodecs) {
+      window.electronAPI.detectGpuCodecs().then((codecs) => {
+        setSupportedCodecs(codecs || { h264_nvenc: false, h264_amf: false, h264_qsv: false });
+        
+        // Auto fallback if currently selected codec is not supported by the system
+        const currentCodec = state.exportSettings.codec || 'libx264';
+        if (currentCodec !== 'libx264' && codecs && !codecs[currentCodec]) {
+          actions.setExportSettings({ codec: 'libx264' });
+          actions.addToast(`GPU codec "${currentCodec}" is unsupported on this system. Falling back to CPU standard encoding.`, 'warning');
+        }
+      });
+    }
+  }, [state.showExportModal, state.exportSettings.codec]);
 
   const handleCancelExport = async () => {
     cancelExportRef.current = true;
@@ -421,9 +443,15 @@ export default function ExportModal() {
               disabled={state.isExporting}
             >
               <option value="libx264">CPU (Standard - libx264)</option>
-              <option value="h264_nvenc">NVIDIA NVENC (GPU - h264_nvenc)</option>
-              <option value="h264_amf">AMD AMF (GPU - h264_amf)</option>
-              <option value="h264_qsv">Intel QSV (GPU - h264_qsv)</option>
+              <option value="h264_nvenc" disabled={!supportedCodecs.h264_nvenc}>
+                NVIDIA NVENC (GPU - h264_nvenc){!supportedCodecs.h264_nvenc ? ' - Unsupported' : ''}
+              </option>
+              <option value="h264_amf" disabled={!supportedCodecs.h264_amf}>
+                AMD AMF (GPU - h264_amf){!supportedCodecs.h264_amf ? ' - Unsupported' : ''}
+              </option>
+              <option value="h264_qsv" disabled={!supportedCodecs.h264_qsv}>
+                Intel QSV (GPU - h264_qsv){!supportedCodecs.h264_qsv ? ' - Unsupported' : ''}
+              </option>
             </select>
           </div>
 

@@ -3,6 +3,78 @@ import { useProject } from '../store/ProjectContext';
 import { getInterpolatedKeyframeTransform } from '../engine/animationEngine';
 import { formatTime, readFileAsDataUrl } from '../utils/fileHelpers';
 
+const STYLE_PRESETS = {
+  'tiktok-karaoke': {
+    fontFamily: 'Impact',
+    caseMode: 'uppercase',
+    wordsPerLine: 3,
+    color: '#ffffff',
+    highlightColor: '#ffd21e',
+    enableHighlight: true,
+    strokeColor: '#000000',
+    strokeWidth: 5,
+    shadowColor: 'rgba(0,0,0,0.5)',
+    shadowBlur: 10,
+    shadowOffsetX: 3,
+    shadowOffsetY: 3,
+    showBackground: false,
+    scaleBounce: true,
+  },
+  'insta-minimalist': {
+    fontFamily: 'Inter',
+    caseMode: 'none',
+    wordsPerLine: 3,
+    color: '#ffffff',
+    highlightColor: '#b0bec5',
+    enableHighlight: true,
+    strokeColor: '#000000',
+    strokeWidth: 0,
+    shadowColor: 'rgba(0,0,0,0)',
+    shadowBlur: 0,
+    shadowOffsetX: 0,
+    shadowOffsetY: 0,
+    showBackground: true,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    backgroundPadding: 12,
+    scaleBounce: false,
+  },
+  'beast-glow': {
+    fontFamily: 'Montserrat',
+    caseMode: 'uppercase',
+    wordsPerLine: 2,
+    color: '#ffffff',
+    highlightColor: '#00e676',
+    enableHighlight: true,
+    strokeColor: '#000000',
+    strokeWidth: 6,
+    glowColor: 'rgba(0,230,118,0.7)',
+    glowBlur: 15,
+    shadowColor: 'rgba(0,0,0,0.5)',
+    shadowBlur: 8,
+    shadowOffsetX: 4,
+    shadowOffsetY: 4,
+    showBackground: false,
+    scaleBounce: true,
+  },
+  'retro-typewriter': {
+    fontFamily: 'Courier New',
+    caseMode: 'lowercase',
+    wordsPerLine: 4,
+    color: '#ffffff',
+    enableHighlight: false,
+    strokeColor: '#000000',
+    strokeWidth: 0,
+    shadowColor: 'rgba(0,0,0,0)',
+    shadowBlur: 0,
+    shadowOffsetX: 0,
+    shadowOffsetY: 0,
+    showBackground: true,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    backgroundPadding: 8,
+    scaleBounce: false,
+  }
+};
+
 /**
  * Script Editor & Inspector Panel
  * Features: Raw Script parsing, Dialogue Blocks list, and an Inspector Tab
@@ -116,6 +188,48 @@ export default function ScriptEditor({ onMinimize }) {
       setActiveTab('animations');
     }
   }, [state.selectedElementId, state.selectedClipId]);
+
+  // Keep a ref to totalDuration to avoid effect re-subscriptions
+  const totalDurationRef = useRef(state.totalDuration);
+  useEffect(() => {
+    totalDurationRef.current = state.totalDuration;
+  }, [state.totalDuration]);
+
+  // Direct DOM listeners to handle 60 FPS playhead updates with 0 React renders
+  useEffect(() => {
+    const onTimeUpdate = (e) => {
+      const t = e.detail;
+
+      // 1. Update active dialogue block classes directly in DOM
+      const blocks = document.querySelectorAll('.dialogue-block');
+      blocks.forEach((el) => {
+        const start = parseFloat(el.getAttribute('data-start'));
+        const duration = parseFloat(el.getAttribute('data-duration'));
+        if (!isNaN(start) && !isNaN(duration)) {
+          const active = t >= start && t <= start + duration;
+          if (active) {
+            el.classList.add('dialogue-block--active');
+          } else {
+            el.classList.remove('dialogue-block--active');
+          }
+        }
+      });
+
+      // 2. Update animation graph playhead line directly in DOM
+      const graphPlayhead = document.querySelector('.graph-playhead-line');
+      if (graphPlayhead) {
+        const svgWidth = 800;
+        const paddingX = 40;
+        const totalDuration = totalDurationRef.current || 30;
+        const x = paddingX + (t / totalDuration) * (svgWidth - 2 * paddingX);
+        graphPlayhead.setAttribute('x1', x);
+        graphPlayhead.setAttribute('x2', x);
+      }
+    };
+
+    window.addEventListener('timeupdate', onTimeUpdate);
+    return () => window.removeEventListener('timeupdate', onTimeUpdate);
+  }, []);
 
   const handleScriptChange = (e) => {
     actions.setScript(e.target.value);
@@ -344,6 +458,35 @@ export default function ScriptEditor({ onMinimize }) {
       wordsPerLine: 3,
       caseMode: 'uppercase',
     };
+  };
+
+  const applyFullStyleTemplate = (charId, templateStyle) => {
+    const char = state.characters.find(c => c.id === charId);
+    if (!char) return;
+    const selectedBlock = state.dialogueBlocks.find(b => b.id === state.selectedClipId);
+
+    if (styleTarget === 'clip' && selectedBlock && selectedBlock.characterId === charId) {
+      const blockStyle = selectedBlock.textStyle || {};
+      actions.updateBlock(selectedBlock.id, {
+        textStyle: { ...blockStyle, ...templateStyle }
+      });
+    } else {
+      // Apply globally to character
+      actions.updateCharacterStyle(charId, templateStyle);
+      
+      // Clear block-level overrides for these style properties
+      const keys = Object.keys(templateStyle);
+      const updatedBlocks = state.dialogueBlocks.map(b => {
+        if (b.characterId === charId && b.textStyle) {
+          const nextStyle = { ...b.textStyle };
+          keys.forEach(k => delete nextStyle[k]);
+          return { ...b, textStyle: nextStyle };
+        }
+        return b;
+      });
+      actions.setBlocks(updatedBlocks);
+    }
+    actions.addToast('Style preset template applied!', 'success');
   };
 
   const updateStyle = (charId, key, value) => {
@@ -712,6 +855,30 @@ export default function ScriptEditor({ onMinimize }) {
                   </span>
                 )}
               </div>
+            </div>
+          </div>
+
+          <div className="inspector-section-title">Style Presets</div>
+          <div className="inspector-section">
+            <div className="form-group">
+              <label className="form-label">Caption Templates</label>
+              <select
+                className="form-select"
+                onChange={(e) => {
+                  const template = STYLE_PRESETS[e.target.value];
+                  if (template) {
+                    applyFullStyleTemplate(selectedChar.id, template);
+                  }
+                  e.target.value = ""; // reset select
+                }}
+                defaultValue=""
+              >
+                <option value="" disabled>-- Select Preset Style --</option>
+                <option value="tiktok-karaoke">TikTok Karaoke Classic</option>
+                <option value="insta-minimalist">Instagram Minimalist</option>
+                <option value="beast-glow">MrBeast Green Glow</option>
+                <option value="retro-typewriter">Retro Typewriter Box</option>
+              </select>
             </div>
           </div>
 
@@ -1591,6 +1758,7 @@ export default function ScriptEditor({ onMinimize }) {
 
                 {/* Vertical Playhead Indicator */}
                 <line
+                  className="graph-playhead-line"
                   x1={timeToX(state.currentTime)}
                   y1={paddingY}
                   x2={timeToX(state.currentTime)}
@@ -2122,6 +2290,8 @@ export default function ScriptEditor({ onMinimize }) {
                 state.dialogueBlocks.map((block, index) => (
                   <div
                     key={block.id}
+                    data-start={block.startTime}
+                    data-duration={block.duration}
                     className={`dialogue-block ${state.currentTime >= block.startTime && state.currentTime <= block.startTime + block.duration ? 'dialogue-block--active' : ''} ${state.selectedClipId === block.id ? 'dialogue-block--selected' : ''}`}
                     style={{ '--block-color': block.color }}
                     onClick={() => {

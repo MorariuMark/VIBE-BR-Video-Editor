@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // GPU Settings
   setGPUAcceleration: (enabled) => ipcRenderer.invoke('set-gpu-acceleration', enabled),
   getGPUAcceleration: () => ipcRenderer.invoke('get-gpu-acceleration'),
+  detectGpuCodecs: () => ipcRenderer.invoke('detect-gpu-codecs'),
+
+  // File system utilities
+  checkFileExists: (filePath) => ipcRenderer.invoke('check-file-exists', filePath),
 
   // Voice Cloning
   openVoiceCloneWindow: () => ipcRenderer.send('open-voice-clone-window'),

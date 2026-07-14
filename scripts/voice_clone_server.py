@@ -25,6 +25,24 @@ transcriber = None
 temp_dir = os.path.join(project_dir, "dist", "voice_temp")
 os.makedirs(temp_dir, exist_ok=True)
 
+# Create voice cache directories inside project presets
+cache_dir = os.path.abspath(os.path.join(project_dir, "presets", "media", "voice_cache"))
+os.makedirs(cache_dir, exist_ok=True)
+
+import hashlib
+import json
+
+def get_cache_key(text, ref_audio, ref_text, temperature, speed, model_type):
+    ref_audio_stat = ""
+    if os.path.exists(ref_audio):
+        stat = os.stat(ref_audio)
+        ref_audio_stat = f"{ref_audio}_{stat.st_mtime}_{stat.st_size}"
+    else:
+        ref_audio_stat = ref_audio
+        
+    payload = f"{text}||{ref_audio_stat}||{ref_text}||{temperature}||{speed}||{model_type}"
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
 @app.route("/status", methods=["GET"])
 def status():
     import torch
@@ -395,6 +413,38 @@ def clone_voice():
         if not ref_audio or not os.path.exists(ref_audio):
             return jsonify({"success": False, "error": f"Reference audio file not found: {ref_audio}"}), 400
 
+        # Check Cache
+        cache_key = get_cache_key(text, ref_audio, ref_text, temperature, speed, model_type)
+        cache_wav_path = os.path.join(cache_dir, f"{cache_key}.wav")
+        cache_json_path = os.path.join(cache_dir, f"{cache_key}.json")
+        
+        if os.path.exists(cache_wav_path) and os.path.exists(cache_json_path):
+            try:
+                with open(cache_json_path, 'r', encoding='utf-8') as f:
+                    cached_metadata = json.load(f)
+                
+                # Resolve save_path
+                save_path = data.get("save_path", "")
+                if save_path:
+                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                    wav_path = save_path
+                else:
+                    file_id = str(uuid.uuid4())
+                    wav_path = os.path.join(temp_dir, f"clip_{file_id}.wav")
+                
+                # Copy cached WAV file to save_path
+                shutil.copyfile(cache_wav_path, wav_path)
+                
+                print(f"[Python Server] [Cache Hit] Served generated voice from cache for key {cache_key}", flush=True)
+                return jsonify({
+                    "success": True,
+                    "wav_path": wav_path,
+                    "duration": cached_metadata.get("duration"),
+                    "words": cached_metadata.get("words", [])
+                })
+            except Exception as cache_err:
+                print(f"[Python Server] [Cache Error] Failed reading cache: {str(cache_err)}. Recalculating...", flush=True)
+
         print(f"[Python Server] Generating voice clone ({model_type}) for text: '{text[:30]}...'", flush=True)
         
         if model_type in ["qwen3tts_0.6b", "qwen3tts_1.7b"]:
@@ -488,6 +538,18 @@ def clone_voice():
         except Exception as trans_err:
             traceback.print_exc()
             print(f"[Python Server] Failed to transcribe word timestamps: {str(trans_err)}", flush=True)
+
+        # Write to Cache
+        try:
+            shutil.copyfile(wav_path, cache_wav_path)
+            with open(cache_json_path, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "duration": duration,
+                    "words": words
+                }, f, indent=2)
+            print(f"[Python Server] Saved generated speech clip to cache under key {cache_key}", flush=True)
+        except Exception as cache_write_err:
+            print(f"[Python Server] Failed to write speech clip to cache: {str(cache_write_err)}", flush=True)
 
         return jsonify({
             "success": True,
