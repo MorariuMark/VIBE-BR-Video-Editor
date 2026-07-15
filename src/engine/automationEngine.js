@@ -150,6 +150,22 @@ export function createExecutor(actions, getState, log) {
   let generatedVoiceResult = null; // Stores generated voice data between GENERATE_VOICES and APPLY_VOICES
   let activeFetchController = null;
 
+  const sleep = (ms) => {
+    if (aborted) return Promise.reject(new Error('ABORTED'));
+    return new Promise((resolve, reject) => {
+      const startTime = Date.now();
+      const interval = setInterval(() => {
+        if (aborted) {
+          clearInterval(interval);
+          reject(new Error('ABORTED'));
+        } else if (Date.now() - startTime >= ms) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 50);
+    });
+  };
+
   const abort = () => {
     aborted = true;
     log('⛔ Execution aborted by user.', 'error');
@@ -331,9 +347,12 @@ export function createExecutor(actions, getState, log) {
       log(`🔌 Checking TTS server status...`, 'system');
       let statusData;
       try {
-        const statusRes = await fetch(`${TTS_SERVER}/status`);
+        activeFetchController = new AbortController();
+        const statusRes = await fetch(`${TTS_SERVER}/status`, { signal: activeFetchController.signal });
         statusData = await statusRes.json();
+        activeFetchController = null;
       } catch (err) {
+        activeFetchController = null;
         throw new Error(`TTS server is not running at ${TTS_SERVER}. Start the Python voice server first.`);
       }
 
@@ -345,15 +364,31 @@ export function createExecutor(actions, getState, log) {
       // Unload existing model if different one is loaded
       if (statusData.model_loaded) {
         log(`🔄 Unloading current model to switch to ${displayName}...`, 'info');
-        await fetch(`${TTS_SERVER}/unload`, { method: 'POST' });
+        try {
+          activeFetchController = new AbortController();
+          await fetch(`${TTS_SERVER}/unload`, { method: 'POST', signal: activeFetchController.signal });
+          activeFetchController = null;
+        } catch (err) {
+          activeFetchController = null;
+          throw err;
+        }
       }
 
       log(`⏳ Loading ${displayName} into VRAM...`, 'info');
-      const loadRes = await fetch(`${TTS_SERVER}/load`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model_name: resolvedModel }),
-      });
+      let loadRes;
+      try {
+        activeFetchController = new AbortController();
+        loadRes = await fetch(`${TTS_SERVER}/load`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model_name: resolvedModel }),
+          signal: activeFetchController.signal,
+        });
+        activeFetchController = null;
+      } catch (err) {
+        activeFetchController = null;
+        throw err;
+      }
       const loadData = await loadRes.json();
 
       if (!loadData.success) {
@@ -877,57 +912,70 @@ export function createExecutor(actions, getState, log) {
       const maxInFlight = 8;
       const activePromises = [];
 
-      for (let i = 0; i < totalFrames; i++) {
-        checkAbort();
+      try {
+        for (let i = 0; i < totalFrames; i++) {
+          checkAbort();
 
-        const time = i / fps;
+          const time = i / fps;
 
-        drawFrame(exportCtx, {
-          state,
-          time,
-          width: exportCanvas.width,
-          height: exportCanvas.height,
-          loadedImages,
-          videoElement: null,
-          drawHandles: false,
-          transparentBackground: true,
-        });
+          drawFrame(exportCtx, {
+            state,
+            time,
+            width: exportCanvas.width,
+            height: exportCanvas.height,
+            loadedImages,
+            videoElement: null,
+            drawHandles: false,
+            transparentBackground: true,
+          });
 
-        const imgData = exportCtx.getImageData(0, 0, exportCanvas.width, exportCanvas.height).data;
-        const sendPromise = window.electronAPI.sendFrame(imgData);
-        activePromises.push(sendPromise);
+          const imgData = exportCtx.getImageData(0, 0, exportCanvas.width, exportCanvas.height).data;
+          const sendPromise = window.electronAPI.sendFrame(imgData);
+          activePromises.push(sendPromise);
 
-        if (activePromises.length >= maxInFlight) {
-          const success = await activePromises.shift();
-          if (!success) {
-            throw new Error('FFmpeg frame write failed.');
+          if (activePromises.length >= maxInFlight) {
+            const success = await activePromises.shift();
+            if (!success) {
+              throw new Error('FFmpeg frame write failed.');
+            }
+          }
+
+          // Progress logging every 10%
+          if (i > 0 && i % Math.floor(totalFrames / 10) === 0) {
+            const pct = Math.round((i / totalFrames) * 100);
+            log(`   ⏳ Rendering: ${pct}% (frame ${i}/${totalFrames})`, 'info');
           }
         }
 
-        // Progress logging every 10%
-        if (i > 0 && i % Math.floor(totalFrames / 10) === 0) {
-          const pct = Math.round((i / totalFrames) * 100);
-          log(`   ⏳ Rendering: ${pct}% (frame ${i}/${totalFrames})`, 'info');
+        // Wait for remaining frames
+        const results = await Promise.all(activePromises);
+        if (results.some(r => !r)) {
+          throw new Error('FFmpeg final frame write failed.');
         }
-      }
 
-      // Wait for remaining frames
-      const results = await Promise.all(activePromises);
-      if (results.some(r => !r)) {
-        throw new Error('FFmpeg final frame write failed.');
-      }
+        await window.electronAPI.endFrameExport();
+        const result = await exportPromise;
 
-      await window.electronAPI.endFrameExport();
-      const result = await exportPromise;
-
-      if (finalAudioPath && finalAudioPath.includes('temp_mix_') && window.electronAPI.deleteFile) {
-        await window.electronAPI.deleteFile(finalAudioPath);
-      }
-
-      if (result.success) {
-        log(`✅ Render complete! Saved to: ${outputPath}`, 'success');
-      } else {
-        throw new Error(`Render failed: ${result.error}`);
+        if (result.success) {
+          log(`✅ Render complete! Saved to: ${outputPath}`, 'success');
+        } else {
+          throw new Error(`Render failed: ${result.error}`);
+        }
+      } catch (renderError) {
+        log(`⚠️ Render process interrupted: ${renderError.message}`, 'warning');
+        if (window.electronAPI?.killExport) {
+          log(`🛑 Stopping FFmpeg export process...`, 'warning');
+          await window.electronAPI.killExport();
+        }
+        throw renderError;
+      } finally {
+        if (finalAudioPath && finalAudioPath.includes('temp_mix_') && window.electronAPI.deleteFile) {
+          try {
+            await window.electronAPI.deleteFile(finalAudioPath);
+          } catch (deleteErr) {
+            console.error('[Automation] Failed to delete temp mix:', deleteErr);
+          }
+        }
       }
     },
 
@@ -1311,7 +1359,7 @@ export function createExecutor(actions, getState, log) {
           log(`⚠️ Unload fallback failed: ${unloadErr.message}`, 'warning');
         }
 
-        if (err.message === 'ABORTED') {
+        if (aborted || err.message === 'ABORTED') {
           log('⛔ Execution aborted.', 'error');
           return { success: false, aborted: true };
         }

@@ -206,13 +206,70 @@ function coreProjectReducer(state, action) {
     case ActionTypes.UPDATE_BLOCK_TIMING: {
       const { blockId, startTime, duration } = action.payload;
       const oldBlock = state.dialogueBlocks.find(b => b.id === blockId);
-      let blocks = state.dialogueBlocks.map(b =>
-        b.id === blockId ? { ...b, startTime: startTime ?? b.startTime, duration: duration ?? b.duration } : b
-      );
-      const idx = blocks.findIndex(b => b.id === blockId);
-      if (idx >= 0) {
-        blocks = recalculateTimings(blocks, idx, oldBlock);
+      if (!oldBlock) return state;
+
+      const origStartTime = oldBlock.startTime;
+      const origDuration = oldBlock.duration;
+      const otherBlocks = state.dialogueBlocks.filter(b => b.id !== blockId);
+
+      let finalStartTime = startTime ?? origStartTime;
+      let finalDuration = duration ?? origDuration;
+
+      if (startTime !== undefined && duration === undefined) {
+        // Dragging / Moving (duration remains constant)
+        const sortedOther = [...otherBlocks].sort((a, b) => a.startTime - b.startTime);
+        
+        // Find all unoccupied intervals (gaps) in dialogue blocks
+        const gaps = [];
+        let lastEnd = 0;
+        for (const b of sortedOther) {
+          if (b.startTime > lastEnd) {
+            gaps.push({ start: lastEnd, end: b.startTime });
+          }
+          lastEnd = Math.max(lastEnd, b.startTime + b.duration);
+        }
+        gaps.push({ start: lastEnd, end: Math.max(lastEnd, state.totalDuration || 3600) });
+
+        // Filter for gaps that can fit this block
+        const validGaps = gaps.filter(g => (g.end - g.start) >= finalDuration);
+
+        if (validGaps.length > 0) {
+          let minDistance = Infinity;
+          let bestStart = finalStartTime;
+          for (const gap of validGaps) {
+            const clampedStart = Math.max(gap.start, Math.min(gap.end - finalDuration, startTime));
+            const distance = Math.abs(clampedStart - startTime);
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestStart = clampedStart;
+            }
+          }
+          finalStartTime = bestStart;
+        }
+      } else if (startTime !== undefined && duration !== undefined) {
+        // Resizing left side
+        const precedingBlocks = otherBlocks.filter(b => b.startTime + b.duration <= origStartTime);
+        const prevLimit = precedingBlocks.length > 0
+          ? Math.max(...precedingBlocks.map(b => b.startTime + b.duration))
+          : 0;
+        
+        const origRightEdge = origStartTime + origDuration;
+        finalStartTime = Math.max(prevLimit, Math.min(origRightEdge - 0.2, startTime));
+        finalDuration = origRightEdge - finalStartTime;
+      } else if (startTime === undefined && duration !== undefined) {
+        // Resizing right side
+        const succeedingBlocks = otherBlocks.filter(b => b.startTime >= origStartTime + origDuration);
+        const nextLimit = succeedingBlocks.length > 0
+          ? Math.min(...succeedingBlocks.map(b => b.startTime))
+          : state.totalDuration;
+        
+        finalDuration = Math.max(0.2, Math.min(nextLimit - origStartTime, duration));
       }
+
+      // Update blocks array
+      const blocks = state.dialogueBlocks.map(b =>
+        b.id === blockId ? { ...b, startTime: finalStartTime, duration: finalDuration } : b
+      );
 
       // Sync corresponding locked presence clip(s)
       const targetBlock = blocks.find(b => b.id === blockId);
@@ -223,35 +280,12 @@ function coreProjectReducer(state, action) {
           if (clip.id === `presence_${blockId}`) {
             return {
               ...clip,
-              startTime: targetBlock.startTime,
-              duration: targetBlock.duration,
+              startTime: finalStartTime,
+              duration: finalDuration,
             };
           }
           return clip;
         });
-
-        // Also shift subsequent locked presence clips if a ripple edit occurred
-        if (oldBlock) {
-          const oldEndTime = oldBlock.startTime + oldBlock.duration;
-          const newEndTime = targetBlock.startTime + targetBlock.duration;
-          const delta = newEndTime - oldEndTime;
-          if (delta !== 0) {
-            for (let i = idx + 1; i < blocks.length; i++) {
-              const subBlock = blocks[i];
-              if (!subBlock.unlocked) {
-                characterPresenceClips = characterPresenceClips.map(clip => {
-                  if (clip.id === `presence_${subBlock.id}`) {
-                    return {
-                      ...clip,
-                      startTime: subBlock.startTime,
-                    };
-                  }
-                  return clip;
-                });
-              }
-            }
-          }
-        }
       }
 
       const totalDuration = recalculateTotalDuration(blocks);
@@ -262,8 +296,12 @@ function coreProjectReducer(state, action) {
     case ActionTypes.SET_BLOCKS: {
       const blocks = action.payload;
       const totalDuration = recalculateTotalDuration(blocks);
-      const tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration });
-      return { ...state, dialogueBlocks: blocks, totalDuration, tracks };
+      let characterPresenceClips = state.characterPresenceClips || [];
+      characterPresenceClips = characterPresenceClips.filter(clip => 
+        blocks.some(b => `presence_${b.id}` === clip.id || b.id === clip.id)
+      );
+      const tracks = generateTracksFromBlocks(blocks, state.characters, { ...state, totalDuration, characterPresenceClips });
+      return { ...state, dialogueBlocks: blocks, totalDuration, tracks, characterPresenceClips };
     }
     
     case ActionTypes.RESET_CHARACTER_TRANSFORM: {
@@ -558,9 +596,46 @@ function coreProjectReducer(state, action) {
       } else {
         tracks = state.tracks.map(track => {
           if (track.id !== trackId) return track;
+
+          // Prevent overlap on drop/addition
+          const otherClips = track.clips;
+          const sortedOther = [...otherClips].sort((a, b) => a.startTime - b.startTime);
+          
+          const gaps = [];
+          let lastEnd = 0;
+          for (const c of sortedOther) {
+            if (c.startTime > lastEnd) {
+              gaps.push({ start: lastEnd, end: c.startTime });
+            }
+            lastEnd = Math.max(lastEnd, c.startTime + c.duration);
+          }
+          gaps.push({ start: lastEnd, end: Math.max(lastEnd, state.totalDuration || 3600) });
+
+          const duration = clip.duration || 5;
+          const targetStart = clip.startTime;
+          const validGaps = gaps.filter(g => (g.end - g.start) >= duration);
+
+          let finalStartTime = targetStart;
+          if (validGaps.length > 0) {
+            let minDistance = Infinity;
+            let bestStart = targetStart;
+            for (const gap of validGaps) {
+              const clampedStart = Math.max(gap.start, Math.min(gap.end - duration, targetStart));
+              const distance = Math.abs(clampedStart - targetStart);
+              if (distance < minDistance) {
+                minDistance = distance;
+                bestStart = clampedStart;
+              }
+            }
+            finalStartTime = bestStart;
+          } else {
+            finalStartTime = lastEnd;
+          }
+
+          const adjustedClip = { ...clip, startTime: finalStartTime };
           return {
             ...track,
-            clips: [...track.clips, clip],
+            clips: [...track.clips, adjustedClip].sort((a, b) => a.startTime - b.startTime),
           };
         });
       }
@@ -601,17 +676,33 @@ function coreProjectReducer(state, action) {
 
       if (startTime !== undefined && duration === undefined) {
         // Dragging / Moving (duration remains constant)
-        const precedingClips = otherClips.filter(c => c.startTime + c.duration <= origStartTime);
-        const succeedingClips = otherClips.filter(c => c.startTime >= origStartTime + origDuration);
+        const sortedOther = [...otherClips].sort((a, b) => a.startTime - b.startTime);
+        
+        const gaps = [];
+        let lastEnd = 0;
+        for (const c of sortedOther) {
+          if (c.startTime > lastEnd) {
+            gaps.push({ start: lastEnd, end: c.startTime });
+          }
+          lastEnd = Math.max(lastEnd, c.startTime + c.duration);
+        }
+        gaps.push({ start: lastEnd, end: Math.max(lastEnd, state.totalDuration || 3600) });
 
-        const prevClipLimit = precedingClips.length > 0
-          ? Math.max(...precedingClips.map(c => c.startTime + c.duration))
-          : 0;
-        const nextClipLimit = succeedingClips.length > 0
-          ? Math.min(...succeedingClips.map(c => c.startTime))
-          : state.totalDuration;
+        const validGaps = gaps.filter(g => (g.end - g.start) >= finalDuration);
 
-        finalStartTime = Math.max(prevClipLimit, Math.min(nextClipLimit - finalDuration, startTime));
+        if (validGaps.length > 0) {
+          let minDistance = Infinity;
+          let bestStart = finalStartTime;
+          for (const gap of validGaps) {
+            const clampedStart = Math.max(gap.start, Math.min(gap.end - finalDuration, startTime));
+            const distance = Math.abs(clampedStart - startTime);
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestStart = clampedStart;
+            }
+          }
+          finalStartTime = bestStart;
+        }
       } else if (startTime !== undefined && duration !== undefined) {
         // Resizing left side
         const precedingClips = otherClips.filter(c => c.startTime + c.duration <= origStartTime);
@@ -1141,6 +1232,42 @@ function coreProjectReducer(state, action) {
       
       const clip = fromTrack.clips.find(c => c.id === clipId);
       if (!clip) return state;
+
+      // Prevent overlaps on target track by finding the closest valid gap
+      const otherClips = toTrack.clips;
+      const sortedOther = [...otherClips].sort((a, b) => a.startTime - b.startTime);
+      
+      const gaps = [];
+      let lastEnd = 0;
+      for (const c of sortedOther) {
+        if (c.startTime > lastEnd) {
+          gaps.push({ start: lastEnd, end: c.startTime });
+        }
+        lastEnd = Math.max(lastEnd, c.startTime + c.duration);
+      }
+      gaps.push({ start: lastEnd, end: Math.max(lastEnd, state.totalDuration || 3600) });
+
+      const duration = clip.duration;
+      const targetStart = clip.startTime;
+      const validGaps = gaps.filter(g => (g.end - g.start) >= duration);
+
+      let finalStartTime = targetStart;
+      if (validGaps.length > 0) {
+        let minDistance = Infinity;
+        let bestStart = targetStart;
+        for (const gap of validGaps) {
+          const clampedStart = Math.max(gap.start, Math.min(gap.end - duration, targetStart));
+          const distance = Math.abs(clampedStart - targetStart);
+          if (distance < minDistance) {
+            minDistance = distance;
+            bestStart = clampedStart;
+          }
+        }
+        finalStartTime = bestStart;
+      } else {
+        // Does not fit in any gap on the target track, reject move
+        return state;
+      }
       
       const tracks = state.tracks.map(t => {
         if (t.id === fromTrackId) {
@@ -1150,9 +1277,10 @@ function coreProjectReducer(state, action) {
           };
         }
         if (t.id === toTrackId) {
+          const movedClip = { ...clip, startTime: finalStartTime };
           return {
             ...t,
-            clips: [...t.clips, clip].sort((a, b) => a.startTime - b.startTime),
+            clips: [...t.clips, movedClip].sort((a, b) => a.startTime - b.startTime),
           };
         }
         return t;

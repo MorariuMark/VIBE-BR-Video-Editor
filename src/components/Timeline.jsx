@@ -257,13 +257,18 @@ export default function Timeline() {
           const trackRow = hoverEl?.closest('.timeline-track');
           if (trackRow) {
             const targetTrackId = trackRow.getAttribute('data-track-id');
-            if (targetTrackId && targetTrackId !== draggingClip.trackId) {
+            if (targetTrackId) {
               const targetTrack = state.tracks.find(t => t.id === targetTrackId);
               if (targetTrack && targetTrack.type === clipTrack.type) {
-                actions.moveClipToTrack(draggingClip.clipId, draggingClip.trackId, targetTrackId);
-                setDraggingClip(prev => ({ ...prev, trackId: targetTrackId }));
+                setDragOverTrackId(targetTrackId);
+              } else {
+                setDragOverTrackId(null);
               }
+            } else {
+              setDragOverTrackId(null);
             }
+          } else {
+            setDragOverTrackId(null);
           }
         }
       }
@@ -332,8 +337,12 @@ export default function Timeline() {
     };
 
     const handleMouseUp = () => {
+      if (draggingClip && dragOverTrackId && dragOverTrackId !== draggingClip.trackId) {
+        actions.moveClipToTrack(draggingClip.clipId, draggingClip.trackId, dragOverTrackId);
+      }
       setDraggingClip(null);
       setResizingClip(null);
+      setDragOverTrackId(null);
       actions.endDragHistory();
     };
 
@@ -345,7 +354,7 @@ export default function Timeline() {
         window.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [draggingClip, resizingClip, pixelsPerSecond]);
+  }, [draggingClip, resizingClip, pixelsPerSecond, dragOverTrackId]);
 
   const handleClipContextMenu = (e, clip, trackId) => {
     e.preventDefault();
